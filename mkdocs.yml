@@ -1,0 +1,27 @@
+site_name: KGTK documentation
+nav:
+  - Home: index.md
+  - Getting started: install.md
+  - KGTK file specification: specification.md
+  - 'KGTK commands':
+      - 'export_gt': 'export_gt.md'
+      - 'filter': 'filter.md'
+      - 'generate_wikidata_triples': 'wikidata.md'
+      - 'graph_statistics': 'stats.md'
+      - 'import_conceptnet': 'import_conceptnet.md'
+      - 'instances': 'instances.md'  
+      - 'reachable_nodes': 'rnodes.md'
+      - 'remove_columns': 'remove_col.md'
+      - 'sort': 'sort.md'
+      - 'text_embeddings': 'embedding.md'
+      - 'validate': 'validate.md'
+      - 'zconcat': 'zconcat.md'
+theme:
+  name: material
+
+markdown_extensions:
+  - admonition
+  - codehilite:
+      guess_lang: false
+  - toc:
+      permalink: true

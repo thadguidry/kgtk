@@ -1,31 +1,7 @@
-# KGTK: Knowledge Graph Toolkit [![doi](https://zenodo.org/badge/DOI/10.5281/zenodo.3828069.svg)](https://doi.org/10.5281/zenodo.3828069)
+## Steps for installing KGTK
 
-KGTK is a Python library for easy manipulation with knowledge graphs. It provides a flexible framework that allows chaining of common graph operations, such as: extraction of subgraphs, filtering, computation of graph metrics, validation, cleaning, generating embeddings, and so on. Its principal format is TSV, though we do support a number of other inputs. 
+**Before you start**:  Our installation will use a conda environment. If you don't have a conda installed, follow this [link](https://docs.conda.io/projects/conda/en/latest/user-guide/install/) to install it.
 
-## Documentation
-
-https://kgtk.readthedocs.io/en/latest/
-
-## Features
-
-* Computation of class instances
-* Computation of reachable nodes
-* Filtering based on property values
-* Removal of columns
-* Sorting
-* Computation of various embeddings
-* Cleaning and validation
-* Computation of graph metrics
-* Joining and concatenation of graphs
-* Manipulation of Wikidata data
-
-## Releases
-
-* [Source code](https://github.com/usc-isi-i2/kgtk/releases)
-
-## Installation
-
-0. Our installations will be in a conda environment. If you don't have a conda installed, follow [link](https://docs.conda.io/projects/conda/en/latest/user-guide/install/) to install it.
 1. Set up your own conda environment:
 ```
 conda create -n kgtk-env python=3.7
@@ -93,9 +69,3 @@ https://www.mankier.com/1/mlr
 
 To get an information on how to use each of them, run:
 `kgtk [TOOL] -h`
-
-More detailed description of the arguments will be added here promptly.
-
-### Developer Instructions
-
-Please refer to [this](README_dev.md)

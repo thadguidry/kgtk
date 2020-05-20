@@ -30,6 +30,7 @@ import typing
 
 from kgtk.kgtkformat import KgtkFormat
 from kgtk.io.kgtkbase import KgtkBase
+from kgtk.utils.argparsehelpers import optional_bool
 from kgtk.utils.closableiter import ClosableIter, ClosableIterTextIOWrapper
 from kgtk.utils.enumnameaction import EnumNameAction
 from kgtk.utils.gzipprocess import GunzipProcess
@@ -103,7 +104,9 @@ class KgtkReaderOptions():
                       mode_options: bool = False,
                       validate_by_default: bool = False,
                       expert: bool = False,
-                      who: str = ""):
+                      defaults: bool = True,
+                      who: str = "",
+    ):
 
         # This helper function makes it easy to suppress options from
         # The help message.  The options are still there, and initialize
@@ -113,6 +116,23 @@ class KgtkReaderOptions():
                 return msg
             else:
                 return SUPPRESS
+
+        # This helper function decices whether or not to include defaults
+        # in argument declarations. If we plan to make arguments with
+        # prefixes and fallbacks, the fallbacks (the ones without prefixes)
+        # should get defaults value, while the prefixed arguments should
+        # not get defaults.
+        #
+        # Note: In obscure circumstances (EnumNameAction, I'm looking at you),
+        # explicitly setting "default=None" may fail, whereas omitting the
+        # "default=" phrase succeeds.
+        #
+        # TODO: continue researching these issues.
+        def d(default: typing.Any)->typing.Mapping[str, typing.Any]:
+            if defaults:
+                return {"default": default}
+            else:
+                return { }
 
         prefix1: str = "--" if len(who) == 0 else "--" + who + "-"
         prefix2: str = "" if len(who) == 0 else who + "_"
@@ -124,8 +144,9 @@ class KgtkReaderOptions():
         fgroup.add_argument(prefix1 + "column-separator",
                             dest=prefix2 + "column_separator",
                             help=h(prefix3 + "Column separator (default=<TAB>)."), # TODO: provide the default with escapes, e.g. \t
-                            type=str, default=KgtkFormat.COLUMN_SEPARATOR)
+                            type=str, **d(default=KgtkFormat.COLUMN_SEPARATOR))
 
+        # TODO: use an Enum or add choices.
         fgroup.add_argument(prefix1 + "compression-type",
                             dest=prefix2 + "compression_type",
                             help=h(prefix3 + "Specify the compression type (default=%(default)s)."))
@@ -133,23 +154,23 @@ class KgtkReaderOptions():
         fgroup.add_argument(prefix1 + "error-limit",
                             dest=prefix2 + "error_limit",
                             help=h(prefix3 + "The maximum number of errors to report before failing (default=%(default)s)"),
-                            type=int, default=cls.ERROR_LIMIT_DEFAULT)
+                            type=int, **d(default=cls.ERROR_LIMIT_DEFAULT))
 
         fgroup.add_argument(prefix1 + "gzip-in-parallel",
                             dest=prefix2 + "gzip_in_parallel",
                             help=h(prefix3 + "Execute gzip in parallel (default=%(default)s)."),
-                            action='store_true')
+                            type=optional_bool, nargs='?', const=True, **d(default=False))
 
         fgroup.add_argument(prefix1 + "gzip-queue-size",
                             dest=prefix2 + "gzip_queue_size",
                             help=h(prefix3 + "Queue size for parallel gzip (default=%(default)s)."),
-                            type=int, default=cls.GZIP_QUEUE_SIZE_DEFAULT)
+                            type=int, **d(default=cls.GZIP_QUEUE_SIZE_DEFAULT))
 
         if mode_options:
             fgroup.add_argument(prefix1 + "mode",
                                 dest=prefix2 + "mode",
                                 help=h(prefix3 + "Determine the KGTK file mode (default=%(default)s)."),
-                                type=KgtkReaderMode, action=EnumNameAction, default=KgtkReaderMode.AUTO)
+                                type=KgtkReaderMode, action=EnumNameAction, **d(KgtkReaderMode.AUTO))
             
         hgroup: _ArgumentGroup = parser.add_argument_group(h(prefix3 + "Header parsing"),
                                                            h("Options affecting " + prefix4 + "header parsing"))
@@ -162,17 +183,17 @@ class KgtkReaderOptions():
         hgroup.add_argument(prefix1 + "header-error-action",
                             dest=prefix2 + "header_error_action",
                             help=h(prefix3 + "The action to take when a header error is detected.  Only ERROR or EXIT are supported (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXIT)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXIT))
 
         hgroup.add_argument(prefix1 + "skip-first-record",
                             dest=prefix2 + "skip_first_record",
                             help=h(prefix3 + "Skip the first record when forcing column names (default=%(default)s)."),
-                            action='store_true')
+                            type=optional_bool, nargs='?', const=True, **d(default=False))
 
         hgroup.add_argument(prefix1 + "unsafe-column-name-action",
                             dest=prefix2 + "unsafe_column_name_action",
                             help=h(prefix3 + "The action to take when a column name is unsafe (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.REPORT)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.REPORT))
 
         lgroup: _ArgumentGroup = parser.add_argument_group(h(prefix3 + "Line parsing"),
                                                            h("Options affecting " + prefix4 + "data line parsing"))
@@ -180,67 +201,57 @@ class KgtkReaderOptions():
         lgroup.add_argument(prefix1 + "repair-and-validate-lines",
                             dest=prefix2 + "repair_and_validate_lines",
                             help=h(prefix3 + "Repair and validate lines (default=%(default)s)."),
-                            action='store_true', default=validate_by_default)
-
-        lgroup.add_argument(prefix1 + "do-not-repair-and-validate-lines",
-                            dest=prefix2 + "repair_and_validate_lines",
-                            help=h(prefix3 + "Do not repair and validate lines."),
-                            action='store_false')
+                            type=optional_bool, nargs='?', const=True, **d(default=validate_by_default))
 
         lgroup.add_argument(prefix1 + "repair-and-validate-values",
                             dest=prefix2 + "repair_and_validate_values",
                             help=h(prefix3 + "Repair and validate values (default=%(default)s)."),
-                            action='store_true', default=validate_by_default)
-
-        lgroup.add_argument(prefix1 + "do-not-repair-and-validate-values",
-                            dest=prefix2 + "repair-and-validate_values",
-                            help=h(prefix3 + "Do not repair and validate values."),
-                            action='store_false')
+                            type=optional_bool, nargs='?', const=True, **d(default=validate_by_default))
 
         lgroup.add_argument(prefix1 + "blank-required-field-line-action",
                             dest=prefix2 + "blank_required_field_line_action",
                             help=h(prefix3 + "The action to take when a line with a blank node1, node2, or id field (per mode) is detected (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXCLUDE)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXCLUDE))
                                   
         lgroup.add_argument(prefix1 + "comment-line-action",
                             dest=prefix2 + "comment_line_action",
                             help=h(prefix3 + "The action to take when a comment line is detected (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXCLUDE)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXCLUDE))
 
         lgroup.add_argument(prefix1 + "empty-line-action",
                             dest=prefix2 + "empty_line_action",
                             help=h(prefix3 + "The action to take when an empty line is detected (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXCLUDE)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXCLUDE))
 
         lgroup.add_argument(prefix1 + "fill-short-lines",
                             dest=prefix2 + "fill_short_lines",
                             help=h(prefix3 + "Fill missing trailing columns in short lines with empty values (default=%(default)s)."),
-                            action='store_true')
+                            type=optional_bool, nargs='?', const=True, **d(default=False))
 
         lgroup.add_argument(prefix1 + "invalid-value-action",
                             dest=prefix2 + "invalid_value_action",
                             help=h(prefix3 + "The action to take when a data cell value is invalid (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.REPORT)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.REPORT))
 
         lgroup.add_argument(prefix1 + "long-line-action",
                             dest=prefix2 + "long_line_action",
                             help=h(prefix3 + "The action to take when a long line is detected (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXCLUDE)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXCLUDE))
 
         lgroup.add_argument(prefix1 + "short-line-action",
                             dest=prefix2 + "short_line_action",
                             help=h(prefix3 + "The action to take when a short line is detected (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXCLUDE)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXCLUDE))
 
         lgroup.add_argument(prefix1 + "truncate-long-lines",
                             dest=prefix2 + "truncate_long_lines",
                             help=h(prefix3 + "Remove excess trailing columns in long lines (default=%(default)s)."),
-                            action='store_true')
+                            type=optional_bool, nargs='?', const=True, **d(default=False))
 
         lgroup.add_argument(prefix1 + "whitespace-line-action",
                             dest=prefix2 + "whitespace_line_action",
                             help=h(prefix3 + "The action to take when a whitespace line is detected (default=%(default)s)."),
-                            type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXCLUDE)
+                            type=ValidationAction, action=EnumNameAction, **d(default=ValidationAction.EXCLUDE))
     
     @classmethod
     # Build the value parsing option structure.
@@ -257,9 +268,9 @@ class KgtkReaderOptions():
         # TODO: Figure out how to type check this method.
         def lookup(name: str, default):
             prefixed_name = prefix + name
-            if prefixed_name in d:
+            if prefixed_name in d and d[prefixed_name] is not None:
                 return d[prefixed_name]
-            elif fallback and name in d:
+            elif fallback and name in d and d[name] is not None:
                 return d[name]
             else:
                 return default
@@ -304,6 +315,34 @@ class KgtkReaderOptions():
     )->'KgtkReaderOptions':
         return cls.from_dict(vars(args), who=who, mode=mode, fallback=fallback)
 
+    def show(self, who: str="", out: typing.TextIO=sys.stderr):
+        prefix: str = "--" if len(who) == 0 else "--" + who + "-"
+        print("%smode=%s" % (prefix, self.mode.name), file=out)
+        print("%scolumn-separator=%s" % (prefix, repr(self.column_separator)), file=out)
+        if self.force_column_names is not None:
+            print("%sforce_column_names=%s" % (prefix, " ".join(self.force_column_names)), file=out)
+        print("%sskip_first_record=%s" % (prefix, str(self.skip_first_record)), file=out)
+        print("%serror-limit=%s" % (prefix, str(self.error_limit)), file=out)
+        print("%srepair-and-validate-lines=%s" % (prefix, str(self.repair_and_validate_lines)), file=out)
+        print("%srepair-and-validate-values=%s" % (prefix, str(self.repair_and_validate_values)), file=out)
+        print("%sempty-line-action=%s" % (prefix, self.empty_line_action.name), file=out)
+        print("%scomment-line-action=%s" % (prefix, self.comment_line_action.name), file=out)
+        print("%swhitespace-line-action=%s" % (prefix, self.whitespace_line_action.name), file=out)
+        print("%sblank-required-field-line-action=%s" % (prefix, self.blank_required_field_line_action.name), file=out)
+        print("%sshort-line-action=%s" % (prefix, self.short_line_action.name), file=out)
+        print("%slong-line-action=%s" % (prefix, self.long_line_action.name), file=out)
+        print("%sheader-error-action=%s" % (prefix, self.header_error_action.name), file=out)
+        print("%sunsafe-column-name-action=%s" % (prefix, self.unsafe_column_name_action.name), file=out)
+        print("%sinvalid-value-action=%s" % (prefix, self.invalid_value_action.name), file=out)
+        print("%sfill-short-lines=%s" % (prefix, str(self.fill_short_lines)), file=out)
+        print("%struncate-long-lines=%s" % (prefix, str(self.truncate_long_lines)), file=out)
+        if self.compression_type is not None:
+            print("%scompression-type=%s" % (prefix, str(self.compression_type)), file=out)
+        print("%sgzip-in-parallel=%s" % (prefix, str(self.gzip_in_parallel)), file=out)
+        print("%sgzip-queue-size=%s" % (prefix, str(self.gzip_queue_size)), file=out)
+              
+        
+
 DEFAULT_KGTK_READER_OPTIONS: KgtkReaderOptions = KgtkReaderOptions()
 
 
@@ -326,10 +365,16 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
     column_name_map: typing.Mapping[str, int] = attr.ib(validator=attr.validators.deep_mapping(key_validator=attr.validators.instance_of(str),
                                                                                                value_validator=attr.validators.instance_of(int)))
 
-    # The index of the mandatory columns.  -1 means missing:
+    # The actual mode used.
+    #
+    # TODO: fix the validator.
+    # mode: KgtkReaderMode = attr.ib(validator=attr.validators.instance_of(KgtkReaderMode), default=KgtkReaderMode.NONE)
+    mode: KgtkReaderMode = attr.ib(default=KgtkReaderMode.NONE)
+
+    # The index of the mandatory/aliased columns.  -1 means missing:
     node1_column_idx: int = attr.ib(validator=attr.validators.instance_of(int), default=-1) # edge file
-    node2_column_idx: int = attr.ib(validator=attr.validators.instance_of(int), default=-1) # edge file
     label_column_idx: int = attr.ib(validator=attr.validators.instance_of(int), default=-1) # edge file
+    node2_column_idx: int = attr.ib(validator=attr.validators.instance_of(int), default=-1) # edge file
     id_column_idx: int = attr.ib(validator=attr.validators.instance_of(int), default=-1) # node file
 
     data_lines_read: int = attr.ib(validator=attr.validators.instance_of(int), default=0)
@@ -364,6 +409,7 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
     def open(cls,
              file_path: typing.Optional[Path],
              error_file: typing.TextIO = sys.stderr,
+             mode: typing.Optional[KgtkReaderMode] = None,
              options: typing.Optional[KgtkReaderOptions] = None,
              value_options: typing.Optional[KgtkValueOptions] = None,
              verbose: bool = False,
@@ -395,9 +441,11 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
                                                                               error_file=error_file)
 
         # Should we automatically determine if this is an edge file or a node file?
+        if mode is None:
+            mode = options.mode
         is_edge_file: bool = False
         is_node_file: bool = False
-        if options.mode is KgtkReaderMode.AUTO:
+        if mode is KgtkReaderMode.AUTO:
             # If we have a node1 (or alias) column, then this must be an edge file. Otherwise, assume it is a node file.
             node1_idx: int = cls.get_column_idx(cls.NODE1_COLUMN_NAMES,
                                                 column_name_map,
@@ -416,88 +464,71 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
                 if verbose:
                     print("node1 column not found, assuming this is a KGTK node file", file=error_file, flush=True)
 
-        elif options.mode is KgtkReaderMode.EDGE:
+        elif mode is KgtkReaderMode.EDGE:
             is_edge_file = True
-        elif options.mode is KgtkReaderMode.NODE:
+        elif mode is KgtkReaderMode.NODE:
             is_node_file = True
-        elif options.mode is KgtkReaderMode.NONE:
+        elif mode is KgtkReaderMode.NONE:
             pass
 
+        # Get the indices of the special columns.
+        node1_column_idx: int
+        label_column_idx: int
+        node2_column_idx: int
+        id_column_idx: int
+        (node1_column_idx,
+         label_column_idx,
+         node2_column_idx,
+         id_column_idx) = cls.get_special_columns(column_name_map,
+                                                  header_line=header,
+                                                  error_action=options.header_error_action,
+                                                  error_file=error_file,
+                                                  is_edge_file=is_edge_file,
+                                                  is_node_file=is_node_file)
+        
+        if verbose:
+            print("KgtkReader: Special columns: node1=%d label=%d node2=%d id=%d" % (node1_column_idx,
+                                                                                     label_column_idx,
+                                                                                     node2_column_idx,
+                                                                                     id_column_idx), file=error_file, flush=True)
         if is_edge_file:
             # We'll instantiate an EdgeReader, which is a subclass of KgtkReader.
             # The EdgeReader import is deferred to avoid circular imports.
             from kgtk.io.edgereader import EdgeReader
             
-            # Get the indices of the required columns.
-            node1_column_idx: int
-            node2_column_idx: int
-            label_column_idx: int
-            (node1_column_idx, node2_column_idx, label_column_idx) = cls.required_edge_columns(column_name_map,
-                                                                                               header_line=header,
-                                                                                               error_action=options.header_error_action,
-                                                                                               error_file=error_file)
-
             if verbose:
-                print("KgtkReader: Reading an edge file. node1=%d label=%d node2=%d" % (node1_column_idx, label_column_idx, node2_column_idx), file=error_file, flush=True)
+                print("KgtkReader: Reading an edge file.", file=error_file, flush=True)
 
-            return EdgeReader(file_path=file_path,
-                              source=source,
-                              column_names=column_names,
-                              column_name_map=column_name_map,
-                              column_count=len(column_names),
-                              node1_column_idx=node1_column_idx,
-                              node2_column_idx=node2_column_idx,
-                              label_column_idx=label_column_idx,
-                              error_file=error_file,
-                              options=options,
-                              value_options=value_options,
-                              is_edge_file=is_edge_file,
-                              is_node_file=is_node_file,
-                              verbose=verbose,
-                              very_verbose=very_verbose)
+            cls = EdgeReader
         
         elif is_node_file:
             # We'll instantiate an NodeReader, which is a subclass of KgtkReader.
             # The NodeReader import is deferred to avoid circular imports.
             from kgtk.io.nodereader import NodeReader
             
-            # Get the index of the required column:
-            id_column_idx: int = cls.required_node_column(column_name_map,
-                                                          header_line=header,
-                                                          error_action=options.header_error_action,
-                                                          error_file=error_file)
-
             if verbose:
-                print("KgtkReader: Reading an node file. id=%d" % (id_column_idx), file=error_file, flush=True)
+                print("KgtkReader: Reading an node file.", file=error_file, flush=True)
 
-            return NodeReader(file_path=file_path,
-                              source=source,
-                              column_names=column_names,
-                              column_name_map=column_name_map,
-                              column_count=len(column_names),
-                              id_column_idx=id_column_idx,
-                              error_file=error_file,
-                              options=options,
-                              value_options=value_options,
-                              is_edge_file=is_edge_file,
-                              is_node_file=is_node_file,
-                              verbose=verbose,
-                              very_verbose=very_verbose,
-            )
-        else:
-            return cls(file_path=file_path,
-                       source=source,
-                       column_names=column_names,
-                       column_name_map=column_name_map,
-                       column_count=len(column_names),
-                       error_file=error_file,
-                       options=options,
-                       value_options=value_options,
-                       is_edge_file=is_edge_file,
-                       is_node_file=is_node_file,
-                       verbose=verbose,
-                       very_verbose=very_verbose,
-            )
+            cls = NodeReader
+
+        return cls(file_path=file_path,
+                   source=source,
+                   column_names=column_names,
+                   column_name_map=column_name_map,
+                   column_count=len(column_names),
+                   mode=mode,
+                   node1_column_idx=node1_column_idx,
+                   label_column_idx=label_column_idx,
+                   node2_column_idx=node2_column_idx,
+                   id_column_idx=id_column_idx,
+                   error_file=error_file,
+                   options=options,
+                   value_options=value_options,
+                   is_edge_file=is_edge_file,
+                   is_node_file=is_node_file,
+                   verbose=verbose,
+                   very_verbose=very_verbose,
+        )
 
     @classmethod
     def _open_compressed_file(cls,
@@ -624,10 +655,11 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
             # Immediately raise an exception.
             raise ValueError("In input data line %d, %s: %s" % (self.data_lines_read, msg, line))
         elif action == ValidationAction.EXIT:
-            print("In input data line %d, %s: %s" % (self.data_lines_read, msg, line), file=self.error_file, flush=True)
+            print("Data line %d:\n%s\n%s" % (self.data_lines_read, line, msg), file=self.error_file, flush=True)
             sys.exit(1)
             
-        print("In input data line %d, %s: %s" % (self.data_lines_read, msg, line), file=self.error_file, flush=True)
+        # print("In input data line %d, %s: %s" % (self.data_lines_read, msg, line), file=self.error_file, flush=True)
+        print("Data line %d:\n%s\n%s" % (self.data_lines_read, line, msg), file=self.error_file, flush=True)
         self.data_errors_reported += 1
         if self.options.error_limit > 0 and self.data_errors_reported >= self.options.error_limit:
             raise ValueError("Too many data errors, exiting.")
@@ -914,7 +946,7 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
             return False
 
         return self.exclude_line(self.options.invalid_value_action,
-                                 "; ".join(problems),
+                                 "\n".join(problems),
                                  line)
 
     # May be overridden
@@ -961,20 +993,40 @@ class KgtkReader(KgtkBase, ClosableIter[typing.List[str]]):
             else:
                 return SUPPRESS
 
-        # TODO: Fix the argparse bug that prevents these two arguments from
-        # having their help messages suppressed.
-        errors_to = parser.add_mutually_exclusive_group()
-        errors_to.add_argument(      "--errors-to-stdout", dest="errors_to_stdout",
-                                     help="Send errors to stdout instead of stderr",
-                                     action="store_true")
-        errors_to.add_argument(      "--errors-to-stderr", dest="errors_to_stderr",
-                                     help="Send errors to stderr instead of stdout",
-                                     action="store_true")
+        egroup: _ArgumentGroup = parser.add_argument_group(h("Error and feedback messages"),
+                                                           h("Send error messages and feedback to stderr or stdout, " +
+                                                             "control the amount of feedback and debugging messages."))
 
-        parser.add_argument("-v", "--verbose", dest="verbose", help="Print additional progress messages.", action='store_true')
+        # Avoid the argparse bug that prevents these two arguments from having
+        # their help messages suppressed directly.
+        #
+        # TODO: Is there a better fix?
+        #
+        # TODO: replace --errors-to-stdout and --errors-to-stderr with
+        # --errors-to=stdout and --errors-to=stderr, using either an enum
+        # or choices.  That will avoid the argparse bug, too.
+        if expert:
+            errors_to = egroup.add_mutually_exclusive_group()
+            errors_to.add_argument(      "--errors-to-stdout", dest="errors_to_stdout",
+                                         help="Send errors to stdout instead of stderr",
+                                         action="store_true")
+            errors_to.add_argument(      "--errors-to-stderr", dest="errors_to_stderr",
+                                         help="Send errors to stderr instead of stdout",
+                                         action="store_true")
+        else:
+            egroup.add_argument(      "--errors-to-stderr", dest="errors_to_stderr",
+                                      help=h("Send errors to stderr instead of stdout"),
+                                      action="store_true")
+            egroup.add_argument(      "--errors-to-stdout", dest="errors_to_stdout",
+                                      help=h("Send errors to stdout instead of stderr"),
+                                      action="store_true")
 
-        parser.add_argument(      "--very-verbose", dest="very_verbose",
-                                  help=h("Print additional progress messages."),
+        egroup.add_argument(      "--show-options", dest="show_options", help=h("Print the options selected (default=%(default)s)."), action='store_true')
+
+        egroup.add_argument("-v", "--verbose", dest="verbose", help="Print additional progress messages (default=%(default)s).", action='store_true')
+
+        egroup.add_argument(      "--very-verbose", dest="very_verbose",
+                                  help=h("Print additional progress messages (default=%(default)s)."),
                                   action='store_true')
         
 def main():
@@ -989,23 +1041,31 @@ def main():
     parser = ArgumentParser()
     parser.add_argument(dest="kgtk_file", help="The KGTK file to read", type=Path, nargs="?")
     KgtkReader.add_debug_arguments(parser, expert=True)
-    parser.add_argument(       "--test", dest="test_method", help="The test to perform",
+    parser.add_argument(       "--test", dest="test_method", help="The test to perform (default=%(default)s).",
                                choices=["rows", "concise-rows",
                                         "kgtk-values", "concise-kgtk-values",
                                         "dicts", "concise-dicts",
                                         "kgtk-value-dicts", "concise-kgtk-value-dicts"],
                                default="rows")
-    parser.add_argument(       "--test-validate", dest="test_validate", help="Validate KgtkValue objects in test.", action='store_true')
+    parser.add_argument(       "--test-validate", dest="test_validate", help="Validate KgtkValue objects in test (default=%(default)s).",
+                               type=optional_bool, nargs='?', const=True, default=False)
 
     KgtkReaderOptions.add_arguments(parser, mode_options=True, validate_by_default=True, expert=True)
     KgtkValueOptions.add_arguments(parser, expert=True)
-    args = parser.parse_args()
+    args: Namespace = parser.parse_args()
 
     error_file: typing.TextIO = sys.stdout if args.errors_to_stdout else sys.stderr
 
     # Build the option structures.
     reader_options: KgtkReaderOptions = KgtkReaderOptions.from_args(args)
     value_options: KgtkValueOptions = KgtkValueOptions.from_args(args)
+
+    if args.show_options:
+        print("--test=%s" % str(args.test), file=error_file)
+        print("--test-validate=%s" % str(args.test_validate), file=error_file)
+        reader_options.show(out=error_file)
+        value_options.show(out=error_file)
+        print("=======", file=error_file, flush=True)
 
     kr: KgtkReader = KgtkReader.open(args.kgtk_file,
                                      error_file = error_file,

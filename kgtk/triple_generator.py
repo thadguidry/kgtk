@@ -21,7 +21,7 @@ from etk.wikidata.value import (
 )
 from etk.knowledge_graph.node import LiteralType
 
-BAD_CHARS = [":", "-", "&", ",", " ",
+BAD_CHARS = [":", "&", ",", " ",
              "(", ")", "\'", '\"', "/", "\\", "[", "]", ";", "|"]
 
 
@@ -52,7 +52,7 @@ class TripleGenerator:
             "monolingualtext": MonolingualText,
             "string": StringValue,
             "external-identifier": ExternalIdentifier,
-            "url": URLValue
+            "url": StringValue
         }
         self.prop_types = self.set_properties(prop_file)
         self.label_set, self.alias_set, self.description_set = self.set_sets(
@@ -73,19 +73,19 @@ class TripleGenerator:
         self.yyyy_mm_dd_pattern = re.compile(
             "[12]\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])")
         self.yyyy_pattern = re.compile("[12]\d{3}")
+        # self.quantity_pattern = re.compile("([\+|\-]?[0-9]+\.?[0-9]*)(?:\[([\+|\-]?[0-9]+\.?[0-9]*),([\+|\-]?[0-9]+\.?[0-9]*)\])?([U|Q](?:[0-9]+))?")
         self.quantity_pattern = re.compile(
-            "([\+|\-]?[0-9]+\.?[0-9]*)(?:\[([\+|\-]?[0-9]+\.?[0-9]*),([\+|\-]?[0-9]+\.?[0-9]*)\])?([U|Q](?:[0-9]+))?")
+            "([\+|\-]?[0-9]+\.?[0-9]*[e|E]?[\-]?[0-9]*)(?:\[([\+|\-]?[0-9]+\.?[0-9]*),([\+|\-]?[0-9]+\.?[0-9]*)\])?([U|Q](?:[0-9]+))?")
         # order map, know the column index of ["node1","property","node2",id]
         self.order_map = {}
         self.use_id = use_id
-
 
     def _node_2_entity(self, node: str):
         '''
         A node can be Qxxx or Pxxx, return the proper entity.
         '''
         if node in self.prop_types:
-            entity = WDProperty(node, self.datatype_mapping[self.prop_types[node]])
+            entity = WDProperty(node, self.prop_types[node])
         else:
             entity = WDItem(TripleGenerator.replace_illegal_string(node))
         return entity
@@ -270,18 +270,20 @@ class TripleGenerator:
 
         elif edge_type == GlobeCoordinate:
             latitude, longitude = node2[1:].split("/")
+            latitude = float(latitude)
+            longitude = float(longitude)
             object = GlobeCoordinate(
-                latitude, longitude, 0.0001, globe=StringValue("Earth")
-            )
+                latitude, longitude, 0.0001, globe=Item("Q2")) # earth
 
         elif edge_type == QuantityValue:
             # +70[+60,+80]Q743895
+
             res = self.quantity_pattern.match(node2).groups()
             amount, lower_bound, upper_bound, unit = res
 
             amount = TripleGenerator.clean_number_string(amount)
             num_type = self.xsd_number_type(amount)
-
+            
             lower_bound = TripleGenerator.clean_number_string(lower_bound)
             upper_bound = TripleGenerator.clean_number_string(upper_bound)
             if unit != None:
@@ -373,7 +375,7 @@ class TripleGenerator:
         Call corresponding downstream functions
         """
 
-        edge_list = edge.strip().split("\t")
+        edge_list = edge.strip("\n").split("\t")
         l = len(edge_list)
         if line_number == 1:
             # initialize the order_map

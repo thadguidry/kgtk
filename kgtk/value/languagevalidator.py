@@ -11,8 +11,8 @@ https://www.w3.org/TR/2014/REC-rdf11-concepts-20140225/#section-Graph-Literal
 
 from argparse import ArgumentParser, Namespace
 import attr
-import iso639 # type: ignore
-import pycountry # type: ignore
+import iso639  # type: ignore
+import pycountry  # type: ignore
 import typing
 
 from kgtk.value.kgtkvalueoptions import KgtkValueOptions, DEFAULT_KGTK_VALUE_OPTIONS
@@ -22,7 +22,7 @@ from kgtk.value.kgtkvalueoptions import KgtkValueOptions, DEFAULT_KGTK_VALUE_OPT
 # Meanwhile, iso639 (from pypi iso-639) has an ISO 639-3 table
 # from 2015-05-05.
 #
-# https://salsa.debian.org/iso-codes-team/iso-codes/-/blob/master/iso_639-3/iso_639_3.tab 
+# https://salsa.debian.org/iso-codes-team/iso-codes/-/blob/master/iso_639-3/iso_639_3.tab
 # https://pypi.org/project/iso-639/
 #
 # Problem: Wikidata may contain obsolete language codes which have been
@@ -49,23 +49,23 @@ class LanguageValidator:
 
     DEFAULT_ADDITIONAL_LANGUAGE_CODES: typing.List[str] = [
         # New codes:
-        "cnr", # Montenegrin.  Added 21-Dec-2017. https://iso639-3.sil.org/code/cnr
-        "hyw", # Western Armenian.  Added 23-Jan-2018. https://iso639-3.sil.org/code/hyw
-        "szy", # Sakizawa.  Added 25-Jan-2019. https://iso639-3.sil.org/code/szy
-
+        "cnr",  # Montenegrin.  Added 21-Dec-2017. https://iso639-3.sil.org/code/cnr
+        "hyw",  # Western Armenian.  Added 23-Jan-2018. https://iso639-3.sil.org/code/hyw
+        "szy",  # Sakizawa.  Added 25-Jan-2019. https://iso639-3.sil.org/code/szy
         # Obsolete codes:
-        "bh", # Bihari lanuages, apparently replaced by "bih".
-        "mo", # Moldavian. Retired 3-Nov-2008. Replaced by the codes for Romanian.
-              # http://www.personal.psu.edu/ejp10/blogs/gotunicode/2008/11/language-tage-mo-for-moldovan.html
-        "eml", # Emiliano-Romagnolo. Split and retired 16-Jan-2009. https://iso639-3.sil.org/code/eml
+        "bh",  # Bihari lanuages, apparently replaced by "bih".
+        "mo",  # Moldavian. Retired 3-Nov-2008. Replaced by the codes for Romanian.
+        # http://www.personal.psu.edu/ejp10/blogs/gotunicode/2008/11/language-tage-mo-for-moldovan.html
+        "eml",  # Emiliano-Romagnolo. Split and retired 16-Jan-2009. https://iso639-3.sil.org/code/eml
     ]
 
     @classmethod
-    def validate(cls,
-                 lang: str,
-                 options: KgtkValueOptions=DEFAULT_KGTK_VALUE_OPTIONS,
-                 verbose: bool = False,
-    )->bool:
+    def validate(
+        cls,
+        lang: str,
+        options: KgtkValueOptions = DEFAULT_KGTK_VALUE_OPTIONS,
+        verbose: bool = False,
+    ) -> bool:
         # Wikidata contains entries such as:
         # 'panamenha'@pt-br      # language code followed by country code
         # 'Ecuador'@es-formal    # language code followed by dialect name
@@ -74,12 +74,15 @@ class LanguageValidator:
         if verbose:
             print("Validating '%s'" % lang)
 
-        save_lang: str = lang # for the debug prints below.
+        save_lang: str = lang  # for the debug prints below.
         country_or_dialect: str = ""
         if options.allow_language_suffixes and "-" in lang:
             (lang, country_or_dialect) = lang.split("-", 1)
             if verbose:
-                print("'%s' split into '%s' and '%s'" % (save_lang, lang, country_or_dialect))
+                print(
+                    "'%s' split into '%s' and '%s'"
+                    % (save_lang, lang, country_or_dialect)
+                )
 
         if len(lang) == 2:
             # Two-character language codes.
@@ -109,11 +112,16 @@ class LanguageValidator:
         if options.additional_language_codes is not None:
             additional_language_codes = options.additional_language_codes
             if verbose:
-                print("Using a custom list of %d additional language codes." % len(additional_language_codes))
+                print(
+                    "Using a custom list of %d additional language codes."
+                    % len(additional_language_codes)
+                )
         else:
             if verbose:
                 print("Using the default list of additional language codes.")
-            additional_language_codes = LanguageValidator.DEFAULT_ADDITIONAL_LANGUAGE_CODES
+            additional_language_codes = (
+                LanguageValidator.DEFAULT_ADDITIONAL_LANGUAGE_CODES
+            )
 
         if lang in additional_language_codes:
             if verbose:
@@ -124,13 +132,22 @@ class LanguageValidator:
             print("Not found.")
         return False
 
+
 def main():
     """
     Test the language validator.
     """
     parser: ArgumentParser = ArgumentParser()
-    parser.add_argument(dest="values", help="The values(s) to test", type=str, nargs="+")
-    parser.add_argument("-v", "--verbose", dest="verbose", help="Print additional progress messages.", action='store_true')
+    parser.add_argument(
+        dest="values", help="The values(s) to test", type=str, nargs="+"
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbose",
+        help="Print additional progress messages.",
+        action="store_true",
+    )
     KgtkValueOptions.add_arguments(parser)
     args: Namespace = parser.parse_args()
 
@@ -139,8 +156,11 @@ def main():
 
     value: str
     for value in args.values:
-        result: bool = LanguageValidator.validate(value, options=value_options, verbose=args.verbose)                                   
+        result: bool = LanguageValidator.validate(
+            value, options=value_options, verbose=args.verbose
+        )
         print("%s: %s" % (value, str(result)), flush=True)
+
 
 if __name__ == "__main__":
     main()

@@ -5,8 +5,8 @@ from kgtk.exceptions import KGTKArgumentParseException, KGTKSyntaxException
 
 class KGTKArgumentParser(ArgumentParser):
     def __init__(self, *args, **kwargs):
-        if not kwargs.get('formatter_class'):
-            kwargs['formatter_class'] = RawDescriptionHelpFormatter
+        if not kwargs.get("formatter_class"):
+            kwargs["formatter_class"] = RawDescriptionHelpFormatter
 
         self.shared_arguments = set()
         self.default_arguments = set()
@@ -15,9 +15,11 @@ class KGTKArgumentParser(ArgumentParser):
         super(KGTKArgumentParser, self).__init__(*args, **kwargs)
 
     def add_default_argument(self, *args, **kwargs):
-        if 'dest' not in kwargs:
-            raise KGTKSyntaxException('Default argument error: dest not defined')
-        self.add_default_argument_funcs[kwargs['dest']] = partial(self.add_argument, *args, **kwargs)
+        if "dest" not in kwargs:
+            raise KGTKSyntaxException("Default argument error: dest not defined")
+        self.add_default_argument_funcs[kwargs["dest"]] = partial(
+            self.add_argument, *args, **kwargs
+        )
 
     def accept_shared_argument(self, dest):
         self.shared_arguments.add(dest)

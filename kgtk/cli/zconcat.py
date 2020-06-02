@@ -1,7 +1,7 @@
 import os
 import sys
 import io
-import sh # type: ignore
+import sh  # type: ignore
 import tempfile
 
 from kgtk.exceptions import KGTKException
@@ -9,29 +9,53 @@ from kgtk.exceptions import KGTKException
 
 def parser():
     return {
-        'help': 'Concatenate any mixture of plain or gzip/bzip2/xz-compressed files'
+        "help": "Concatenate any mixture of plain or gzip/bzip2/xz-compressed files"
     }
 
+
 def add_arguments(parser):
-    parser.add_argument('-o', '--out', default=None, dest='output',
-                        help='output file to write to, otherwise output goes to stdout')
-    parser.add_argument('--gz', '--gzip', action='store_true', dest='gz',
-                        help='compress result with gzip')
-    parser.add_argument('--bz2', '--bzip2', action='store_true', dest='bz2',
-                        help='compress result with bzip2')
-    parser.add_argument('--xz', action='store_true', dest='xz',
-                        help='compress result with xz')
-    parser.add_argument("inputs", metavar="INPUT", nargs="*", action="store",
-                        help="input files to process, if empty or `-' read from stdin")
+    parser.add_argument(
+        "-o",
+        "--out",
+        default=None,
+        dest="output",
+        help="output file to write to, otherwise output goes to stdout",
+    )
+    parser.add_argument(
+        "--gz",
+        "--gzip",
+        action="store_true",
+        dest="gz",
+        help="compress result with gzip",
+    )
+    parser.add_argument(
+        "--bz2",
+        "--bzip2",
+        action="store_true",
+        dest="bz2",
+        help="compress result with bzip2",
+    )
+    parser.add_argument(
+        "--xz", action="store_true", dest="xz", help="compress result with xz"
+    )
+    parser.add_argument(
+        "inputs",
+        metavar="INPUT",
+        nargs="*",
+        action="store",
+        help="input files to process, if empty or `-' read from stdin",
+    )
 
 
 ### general command utilities (some of these should make it into a more central location):
 
-tmp_dir = '/tmp'       # this should be configurable
-kgtk_encoding = 'utf8' # this should be configurable
+tmp_dir = "/tmp"  # this should be configurable
+kgtk_encoding = "utf8"  # this should be configurable
 
-def make_temp_file(prefix='kgtk.'):
+
+def make_temp_file(prefix="kgtk."):
     return tempfile.mkstemp(dir=tmp_dir, prefix=prefix)[1]
+
 
 def get_buf_sizes(input=None, output=None, _tty_out=True, _piped=False):
     """Determine stream buffer sizes to use.  Since sh has complex rules for this depending on
@@ -39,17 +63,20 @@ def get_buf_sizes(input=None, output=None, _tty_out=True, _piped=False):
     We want to make sure to use large output buffers whenever possible for speed.
     This should probably go into cli_entry.py.
     """
-    in_bufsize = 2**16
+    in_bufsize = 2 ** 16
     out_bufsize = in_bufsize
     try:
         sh.ls.bake(_in=input, _in_bufsize=in_bufsize)
     except:
         in_bufsize = None
     try:
-        sh.ls.bake(_out=output, _out_bufsize=out_bufsize, _tty_out=_tty_out, _piped=_piped)
+        sh.ls.bake(
+            _out=output, _out_bufsize=out_bufsize, _tty_out=_tty_out, _piped=_piped
+        )
     except:
         out_bufsize = None
     return in_bufsize, out_bufsize
+
 
 def get_stream_buffer_size(stream):
     """Determine the buffer size used for `stream' which will either be the underlying file
@@ -62,8 +89,9 @@ def get_stream_buffer_size(stream):
         block_size = os.stat(stream.fileno()).st_blksize
     except:
         block_size = io.DEFAULT_BUFFER_SIZE
-    #sys.stderr.write('get_stream_buffer_size: %d\n' % block_size)
+    # sys.stderr.write('get_stream_buffer_size: %d\n' % block_size)
     return block_size
+
 
 def get_stream_header(stream, preserve=False):
     """Utility to access header information from a stream (usually stdin) without losing
@@ -77,14 +105,29 @@ def get_stream_header(stream, preserve=False):
     if preserve:
         # we need to pass in the header with a temporary file which will be deleted when `cat' terminates.
         # alternatively to this scheme, we could create some kind of concatenated stream class:
-        temp = make_temp_file('kgtk-header.')
-        with open(temp, 'wb') as out:
+        temp = make_temp_file("kgtk-header.")
+        with open(temp, "wb") as out:
             out.write(header.getvalue())
-        cleanup = lambda cmd, status, exit_code: sh.rm('-f', temp)
-        in_bufsize, out_bufsize = get_buf_sizes(input=stream, _tty_out=False, _piped=True)
-        return header.getvalue(), [sh.cat.bake(temp, '-', _in=stream, _in_bufsize=in_bufsize, _piped=True, _done=cleanup)]
+        cleanup = lambda cmd, status, exit_code: sh.rm("-f", temp)
+        in_bufsize, out_bufsize = get_buf_sizes(
+            input=stream, _tty_out=False, _piped=True
+        )
+        return (
+            header.getvalue(),
+            [
+                sh.cat.bake(
+                    temp,
+                    "-",
+                    _in=stream,
+                    _in_bufsize=in_bufsize,
+                    _piped=True,
+                    _done=cleanup,
+                )
+            ],
+        )
     else:
         return header.getvalue()
+
 
 def run_sh_commands(commands, debug=False):
     """Run a single or list of prebaked sh `commands', compose them with pipes when they
@@ -94,7 +137,7 @@ def run_sh_commands(commands, debug=False):
     if not hasattr(commands, "__iter__"):
         commands = [commands]
     if debug:
-        sys.stderr.write('zconcat.run_sh_commands: %s\n' % commands)
+        sys.stderr.write("zconcat.run_sh_commands: %s\n" % commands)
     piped_output = None
     last_cmd = None
     for cmd in commands:
@@ -104,66 +147,79 @@ def run_sh_commands(commands, debug=False):
             piped_output = cmd()
         last_cmd = piped_output
         # TO DO: improve this with a more explicit directive in case we don't use piped or bg:
-        if not (cmd._partial_call_args.get('piped', False) or cmd._partial_call_args.get('bg', False)):
+        if not (
+            cmd._partial_call_args.get("piped", False)
+            or cmd._partial_call_args.get("bg", False)
+        ):
             piped_output = None
     return last_cmd
+
 
 def determine_file_type(file):
     """Determine if `file' is compressed and if so how, and return file and its associated type.
     `file' needs to be a file name or a stream containing enough information to determine its type.
     """
     if isinstance(file, str):
-        file_type = sh.file(file, '--brief').stdout
+        file_type = sh.file(file, "--brief").stdout
     else:
-        file_type = sh.file('-', '--brief', _in=file).stdout
+        file_type = sh.file("-", "--brief", _in=file).stdout
     # tricky: we get a byte sequence here which we have to decode into a string:
     return file_type.split()[0].lower().decode()
 
+
 compression_type_table = {
     # we keep these strings, so we don't require the commands to be available during loading:
-    'gzip':  {'cat': 'zcat',  'compress': 'gzip'},
-    'bzip2': {'cat': 'bzcat', 'compress': 'bzip2'},
-    'xz':    {'cat': 'xzcat', 'compress': 'xz'},
-    'text':  {'cat': 'cat'},
+    "gzip": {"cat": "zcat", "compress": "gzip"},
+    "bzip2": {"cat": "bzcat", "compress": "bzip2"},
+    "xz": {"cat": "xzcat", "compress": "xz"},
+    "text": {"cat": "cat"},
 }
+
 
 def get_cat_command(file_type):
     """Determine a `cat' command based on a `file_type' determined by `determine_file_type'.
     """
-    catcmd = compression_type_table.get(file_type, {}).get('cat', 'cat')
+    catcmd = compression_type_table.get(file_type, {}).get("cat", "cat")
     # now return the equivalent of sh.cat, etc:
     return getattr(sh, catcmd)
+
 
 def get_compress_command(file_type):
     """Return compress command to run based on target `file_type'.
     """
-    compress = compression_type_table.get(file_type, {}).get('compress')
+    compress = compression_type_table.get(file_type, {}).get("compress")
     return compress and getattr(sh, compress) or None
 
 
 ### zconcat implementation:
 
+
 def compress_switch_to_file_type(gz=False, bz2=False, xz=False):
     """Return compressed target file_type based on supplied switches.
     """
-    return (gz and 'gzip') or (bz2 and 'bzip2') or (xz and 'xz') or 'text'
+    return (gz and "gzip") or (bz2 and "bzip2") or (xz and "xz") or "text"
 
-def build_command_1(input=None, output=None, gz=False, bz2=False, xz=False, _piped=False, _out_mode='wb'):
+
+def build_command_1(
+    input=None, output=None, gz=False, bz2=False, xz=False, _piped=False, _out_mode="wb"
+):
     """Build a zconcat sh command pipe for a single `input'.
     If `_piped' is True, configure the last command to ignore `output' and write to a pipe
     in which case this can be used to feed into the input of another command (e.g., sort).
     `_out_mode' controls whether an `output' file will be truncated or appened to.
     """
-    input = input or '-'
+    input = input or "-"
     output = (not _piped and (output or sys.stdout.buffer)) or None
     outfile = None
     if isinstance(output, str):
         outfile = open(output, _out_mode)
         output = outfile
     compress = get_compress_command(compress_switch_to_file_type(gz, bz2, xz))
-    in_bufsize, out_bufsize = get_buf_sizes(output=output, _tty_out=not compress, _piped=_piped)
-    
-    if input == '-':
+    in_bufsize, out_bufsize = get_buf_sizes(
+        output=output, _tty_out=not compress, _piped=_piped
+    )
+
+    if input == "-":
         # process input piped in from stdin, possibly compressed in different ways:
         input = sys.stdin.buffer
         header, input = get_stream_header(input, preserve=True)
@@ -173,11 +229,20 @@ def build_command_1(input=None, output=None, gz=False, bz2=False, xz=False, _pip
         if compress is not None:
             return input + [
                 catcmd.bake(_piped=True),
-                compress.bake('-c', _out=output, _out_bufsize=out_bufsize, _tty_out=False, _done=cleanup, _piped=_piped)
+                compress.bake(
+                    "-c",
+                    _out=output,
+                    _out_bufsize=out_bufsize,
+                    _tty_out=False,
+                    _done=cleanup,
+                    _piped=_piped,
+                ),
             ]
         else:
             return input + [
-                catcmd.bake(_out=output, _out_bufsize=out_bufsize, _done=cleanup, _piped=_piped)
+                catcmd.bake(
+                    _out=output, _out_bufsize=out_bufsize, _done=cleanup, _piped=_piped
+                )
             ]
     else:
         # process a regular named file, possibly compressed in different ways:
@@ -187,24 +252,43 @@ def build_command_1(input=None, output=None, gz=False, bz2=False, xz=False, _pip
         if compress is not None:
             return [
                 catcmd.bake(input, _piped=True),
-                compress.bake('-c', _out=output, _out_bufsize=out_bufsize, _tty_out=False, _done=cleanup, _piped=_piped)
+                compress.bake(
+                    "-c",
+                    _out=output,
+                    _out_bufsize=out_bufsize,
+                    _tty_out=False,
+                    _done=cleanup,
+                    _piped=_piped,
+                ),
             ]
         else:
             return [
-                catcmd.bake(input, _out=output, _out_bufsize=out_bufsize, _done=cleanup, _piped=_piped)
+                catcmd.bake(
+                    input,
+                    _out=output,
+                    _out_bufsize=out_bufsize,
+                    _done=cleanup,
+                    _piped=_piped,
+                )
             ]
+
 
 def build_command(inputs=[], output=None, gz=False, bz2=False, xz=False):
     """Build a zconcat sh command pipe for the provided `inputs' and switches.
     """
     if len(inputs) == 0:
-        inputs.append('-')
+        inputs.append("-")
     command = []
-    out_mode='wb'
+    out_mode = "wb"
     for inp in inputs:
-        command.extend(build_command_1(input=inp, output=output, gz=gz, bz2=bz2, xz=xz, _out_mode=out_mode))
-        out_mode='ab'
+        command.extend(
+            build_command_1(
+                input=inp, output=output, gz=gz, bz2=bz2, xz=xz, _out_mode=out_mode
+            )
+        )
+        out_mode = "ab"
     return command
+
 
 def run(inputs=[], output=None, gz=False, bz2=False, xz=False, _debug=False):
     """Run zconcat according to the provided command-line arguments.
@@ -217,9 +301,10 @@ def run(inputs=[], output=None, gz=False, bz2=False, xz=False, _debug=False):
         # cleanup in case we piped and terminated prematurely:
         sys.stdout.flush()
     except Exception as e:
-        #import traceback
-        #traceback.print_tb(sys.exc_info()[2], 10)
-        raise KGTKException('INTERNAL ERROR: ' + str(e) + '\n')
+        # import traceback
+        # traceback.print_tb(sys.exc_info()[2], 10)
+        raise KGTKException("INTERNAL ERROR: " + str(e) + "\n")
+
 
 """
 # Examples:

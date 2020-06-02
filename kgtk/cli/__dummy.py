@@ -12,10 +12,7 @@ def parser():
     Initialize sub-parser.
     Parameters: https://docs.python.org/3/library/argparse.html#argparse.ArgumentParser
     """
-    return {
-        'help': 'this is example',
-        'description': 'this is a basic example'
-    }
+    return {"help": "this is example", "description": "this is a basic example"}
 
 
 def add_arguments(parser: KGTKArgumentParser):
@@ -27,7 +24,7 @@ def add_arguments(parser: KGTKArgumentParser):
     parser.add_argument(action="store", type=str, metavar="name", dest="name")
     parser.add_argument("-i", "--info", action="store", type=str, dest="info")
     parser.add_argument("-e", "--error", action="store_true", help="raise an error")
-    parser.accept_shared_argument('_debug')
+    parser.accept_shared_argument("_debug")
 
 
 def run(name, info, error, _debug):
@@ -42,9 +39,9 @@ def run(name, info, error, _debug):
     from kgtk.exceptions import KGTKException
 
     if _debug:
-        print('DEBUG MODE')
+        print("DEBUG MODE")
 
     if error:
-        raise KGTKException('An error here\n')
+        raise KGTKException("An error here\n")
 
-    print('name: {}, info: {}\nhost: {}'.format(name, info, socket.gethostname()))
+    print("name: {}, info: {}\nhost: {}".format(name, info, socket.gethostname()))

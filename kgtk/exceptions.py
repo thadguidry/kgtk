@@ -6,7 +6,7 @@ import sh
 
 class KGTKException(BaseException):
     return_code = 1
-    message = 'KGTKException found\n'
+    message = "KGTKException found\n"
 
     def __init__(self, message):
         self.message = message
@@ -41,7 +41,9 @@ class KGTKExceptionHandler(object):
         try:
             return_code = func(*args, **kwargs) or 0
             if return_code != 0:
-                warnings.warn('Please raise exception instead of returning non-zero value')
+                warnings.warn(
+                    "Please raise exception instead of returning non-zero value"
+                )
             return return_code
         except (sh.SignalException_SIGPIPE, BrokenPipeError):
             pass
@@ -51,14 +53,16 @@ class KGTKExceptionHandler(object):
 
     def handle_exception(self, type_, exc_val, exc_tb):
         if self._debug:
-            traceback.print_exception(type_, exc_val, exc_tb)  # the output goes to sys.stderr
+            traceback.print_exception(
+                type_, exc_val, exc_tb
+            )  # the output goes to sys.stderr
 
         if isinstance(exc_val, KGTKException):
             print("%s" % exc_val.message, file=sys.stderr)
             return exc_val.return_code
 
-        warnings.warn('Please raise KGTKException instead of {}'.format(type_))
-        print("%s" %KGTKException.message, file=sys.stderr)
+        warnings.warn("Please raise KGTKException instead of {}".format(type_))
+        print("%s" % KGTKException.message, file=sys.stderr)
         return KGTKException.return_code
 
 

@@ -17,12 +17,11 @@ from etk.wikidata.value import (
     MonolingualText,
     GlobeCoordinate,
     ExternalIdentifier,
-    URLValue
+    URLValue,
 )
 from etk.knowledge_graph.node import LiteralType
 
-BAD_CHARS = [":", "&", ",", " ",
-             "(", ")", "\'", '\"', "/", "\\", "[", "]", ";", "|"]
+BAD_CHARS = [":", "&", ",", " ", "(", ")", "'", '"', "/", "\\", "[", "]", ";", "|"]
 
 
 class TripleGenerator:
@@ -31,18 +30,19 @@ class TripleGenerator:
     """
 
     def __init__(
-            self,
-            prop_file: str,
-            label_set: str,
-            alias_set: str,
-            description_set: str,
-            ignore: bool,
-            n: int,
-            dest_fp: TextIO = sys.stdout,
-            truthy: bool = False,
-            use_id: bool = False,
+        self,
+        prop_file: str,
+        label_set: str,
+        alias_set: str,
+        description_set: str,
+        ignore: bool,
+        n: int,
+        dest_fp: TextIO = sys.stdout,
+        truthy: bool = False,
+        use_id: bool = False,
     ):
         from etk.wikidata.statement import Rank
+
         self.ignore = ignore
         self.datatype_mapping = {
             "item": Item,
@@ -52,7 +52,7 @@ class TripleGenerator:
             "monolingualtext": MonolingualText,
             "string": StringValue,
             "external-identifier": ExternalIdentifier,
-            "url": StringValue
+            "url": StringValue,
         }
         self.prop_types = self.set_properties(prop_file)
         self.label_set, self.alias_set, self.description_set = self.set_sets(
@@ -71,19 +71,21 @@ class TripleGenerator:
         self.reset_etk_doc()
         self.serialize_prefix()
         self.yyyy_mm_dd_pattern = re.compile(
-            "[12]\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])")
+            "[12]\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])"
+        )
         self.yyyy_pattern = re.compile("[12]\d{3}")
         # self.quantity_pattern = re.compile("([\+|\-]?[0-9]+\.?[0-9]*)(?:\[([\+|\-]?[0-9]+\.?[0-9]*),([\+|\-]?[0-9]+\.?[0-9]*)\])?([U|Q](?:[0-9]+))?")
         self.quantity_pattern = re.compile(
-            "([\+|\-]?[0-9]+\.?[0-9]*[e|E]?[\-]?[0-9]*)(?:\[([\+|\-]?[0-9]+\.?[0-9]*),([\+|\-]?[0-9]+\.?[0-9]*)\])?([U|Q](?:[0-9]+))?")
+            "([\+|\-]?[0-9]+\.?[0-9]*[e|E]?[\-]?[0-9]*)(?:\[([\+|\-]?[0-9]+\.?[0-9]*),([\+|\-]?[0-9]+\.?[0-9]*)\])?([U|Q](?:[0-9]+))?"
+        )
         # order map, know the column index of ["node1","property","node2",id]
         self.order_map = {}
         self.use_id = use_id
 
     def _node_2_entity(self, node: str):
-        '''
+        """
         A node can be Qxxx or Pxxx, return the proper entity.
-        '''
+        """
         if node in self.prop_types:
             entity = WDProperty(node, self.prop_types[node])
         else:
@@ -130,8 +132,7 @@ class TripleGenerator:
         Seriealize the triples. Used a hack to avoid serializing the prefix again.
         """
         docs = self.etk.process_ems(self.doc)
-        self.fp.write("\n\n".join(
-            docs[0].kg.serialize("ttl").split("\n\n")[1:]))
+        self.fp.write("\n\n".join(docs[0].kg.serialize("ttl").split("\n\n")[1:]))
         self.fp.flush()
         self.reset()
 
@@ -159,15 +160,15 @@ class TripleGenerator:
 
     @staticmethod
     def process_text_string(string: str) -> [str, str]:
-        ''' 
+        """ 
         Language detection is removed from triple generation. The user is responsible for detect the language
-        '''
+        """
         if len(string) == 0:
             return ["", "en"]
         if "@" in string:
             res = string.split("@")
             text_string = "@".join(res[:-1]).replace('"', "").replace("'", "")
-            lang = res[-1].replace('"', '').replace("'", "")
+            lang = res[-1].replace('"', "").replace("'", "")
             if len(lang) > 2:
                 lang = "en"
         else:
@@ -196,10 +197,14 @@ class TripleGenerator:
         self.doc.kg.add_subject(entity)
         return True
 
-    def generate_prop_declaration_triple(self, node1: str, label: str, node2: str) -> bool:
+    def generate_prop_declaration_triple(
+        self, node1: str, label: str, node2: str
+    ) -> bool:
         # update the known prop_types
         if node1 in self.prop_types:
-            raise KGTKException("Duplicated property definition of {} found!".format(node1))
+            raise KGTKException(
+                "Duplicated property definition of {} found!".format(node1)
+            )
         self.prop_types[node1] = node2
         prop = WDProperty(node1, self.datatype_mapping[node2])
         self.doc.kg.add_subject(prop)
@@ -207,12 +212,13 @@ class TripleGenerator:
 
     @staticmethod
     def xsd_number_type(num):
-        if isinstance(num, float) and 'e' in str(num).lower():
+        if isinstance(num, float) and "e" in str(num).lower():
             return LiteralType.double
         return LiteralType.decimal
 
     def generate_normal_triple(
-            self, node1: str, label: str, node2: str, is_qualifier_edge: bool, e_id: str) -> bool:
+        self, node1: str, label: str, node2: str, is_qualifier_edge: bool, e_id: str
+    ) -> bool:
         if self.use_id:
             e_id = TripleGenerator.replace_illegal_string(e_id)
         entity = self._node_2_entity(node1)
@@ -252,11 +258,9 @@ class TripleGenerator:
                     dateTimeString = dateTimeString[:-1]  # remove "Z"
                     # 2016-00-00T00:00:00 case
                     if "-00-00" in dateTimeString:
-                        dateTimeString = "-01-01".join(
-                            dateTimeString.split("-00-00"))
+                        dateTimeString = "-01-01".join(dateTimeString.split("-00-00"))
                     elif dateTimeString[8:10] == "00":
-                        dateTimeString = dateTimeString[:8] + \
-                                         "01" + dateTimeString[10:]
+                        dateTimeString = dateTimeString[:8] + "01" + dateTimeString[10:]
                     object = TimeValue(
                         value=dateTimeString,
                         calendar=Item("Q1985727"),
@@ -273,7 +277,8 @@ class TripleGenerator:
             latitude = float(latitude)
             longitude = float(longitude)
             object = GlobeCoordinate(
-                latitude, longitude, 0.0001, globe=Item("Q2")) # earth
+                latitude, longitude, 0.0001, globe=Item("Q2")
+            )  # earth
 
         elif edge_type == QuantityValue:
             # +70[+60,+80]Q743895
@@ -283,19 +288,28 @@ class TripleGenerator:
 
             amount = TripleGenerator.clean_number_string(amount)
             num_type = self.xsd_number_type(amount)
-            
+
             lower_bound = TripleGenerator.clean_number_string(lower_bound)
             upper_bound = TripleGenerator.clean_number_string(upper_bound)
             if unit != None:
                 if upper_bound != None and lower_bound != None:
-                    object = QuantityValue(amount, unit=Item(
-                        unit), upper_bound=upper_bound, lower_bound=lower_bound, type=num_type)
+                    object = QuantityValue(
+                        amount,
+                        unit=Item(unit),
+                        upper_bound=upper_bound,
+                        lower_bound=lower_bound,
+                        type=num_type,
+                    )
                 else:
                     object = QuantityValue(amount, unit=Item(unit), type=num_type)
             else:
                 if upper_bound != None and lower_bound != None:
                     object = QuantityValue(
-                        amount, upper_bound=upper_bound, lower_bound=lower_bound, type=num_type)
+                        amount,
+                        upper_bound=upper_bound,
+                        lower_bound=lower_bound,
+                        type=num_type,
+                    )
                 else:
                     object = QuantityValue(amount, type=num_type)
 
@@ -327,19 +341,25 @@ class TripleGenerator:
             if type(object) == WDItem:
                 self.doc.kg.add_subject(object)
             if self.truthy:
-                self.to_append_statement = entity.add_truthy_statement(
-                    label, object, statement_id=e_id) if self.use_id else entity.add_truthy_statement(label, object)
+                self.to_append_statement = (
+                    entity.add_truthy_statement(label, object, statement_id=e_id)
+                    if self.use_id
+                    else entity.add_truthy_statement(label, object)
+                )
             else:
-                self.to_append_statement = entity.add_statement(
-                    label, object, statement_id=e_id) if self.use_id else entity.add_statement(label, object)
+                self.to_append_statement = (
+                    entity.add_statement(label, object, statement_id=e_id)
+                    if self.use_id
+                    else entity.add_statement(label, object)
+                )
             self.doc.kg.add_subject(entity)
         return True
 
     @staticmethod
     def is_invalid_decimal_string(num_string):
-        '''
+        """
         if a decimal string too small, return True TODO
-        '''
+        """
         if num_string == None:
             return False
         else:
@@ -349,13 +369,14 @@ class TripleGenerator:
 
     @staticmethod
     def is_valid_uri_with_scheme_and_host(uri: str):
-        '''
+        """
         https://github.com/python-hyper/rfc3986/issues/30#issuecomment-461661883
-        '''
+        """
         try:
             uri = rfc3986.URIReference.from_string(uri)
             rfc3986.validators.Validator().require_presence_of(
-                "scheme", "host").check_validity_of("scheme", "host").validate(uri)
+                "scheme", "host"
+            ).check_validity_of("scheme", "host").validate(uri)
             return True
         except:
             return False
@@ -363,6 +384,7 @@ class TripleGenerator:
     @staticmethod
     def clean_number_string(num):
         from numpy import format_float_positional
+
         if num == None:
             return None
         else:
@@ -384,9 +406,12 @@ class TripleGenerator:
             node2_index = edge_list.index("node2")
             prop_index = edge_list.index("property")
             id_index = edge_list.index("id")
-            if not all([node1_index > -1, node2_index > -1, prop_index > -1, id_index > -1]):
+            if not all(
+                [node1_index > -1, node2_index > -1, prop_index > -1, id_index > -1]
+            ):
                 raise KGTKException(
-                    "Header of kgtk file misses at least one of required column names: (node1, node2, property and id)")
+                    "Header of kgtk file misses at least one of required column names: (node1, node2, property and id)"
+                )
             else:
                 self.order_map["node1"] = node1_index
                 self.order_map["node2"] = node2_index
@@ -438,24 +463,27 @@ class TripleGenerator:
             success = self.generate_alias_triple(node1, prop, node2)
         elif prop == "data_type":
             # special edge of prop declaration
-            success = self.generate_prop_declaration_triple(
-                node1, prop, node2)
+            success = self.generate_prop_declaration_triple(node1, prop, node2)
         else:
             if prop in self.prop_types:
                 success = self.generate_normal_triple(
-                    node1, prop, node2, is_qualifier_edge, e_id)
+                    node1, prop, node2, is_qualifier_edge, e_id
+                )
             else:
                 if not self.ignore:
                     raise KGTKException(
                         "property {}'s type is unknown at line {}.\n".format(
-                            prop, line_number)
+                            prop, line_number
+                        )
                     )
                     success = False
         if (not success) and (not is_qualifier_edge) and (not self.ignore):
             # We have a corrupted edge here.
             self.ignore_file.write(
                 "Corrupted statement at line number: {} with id {} with current corrupted id {}\n".format(
-                    line_number, e_id, self.corrupted_statement_id))
+                    line_number, e_id, self.corrupted_statement_id
+                )
+            )
             self.ignore_file.flush()
             self.corrupted_statement_id = e_id
         else:
@@ -464,9 +492,9 @@ class TripleGenerator:
 
     @staticmethod
     def replace_illegal_string(s: str) -> str:
-        '''
+        """
         this function serves as the last gate of keeping illegal characters outside of entity creation.
-        '''
+        """
         for char in BAD_CHARS:
             s = s.replace(char, "_")
         return s

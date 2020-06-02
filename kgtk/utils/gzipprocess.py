@@ -20,17 +20,17 @@ class GzipProcess(Process):
 
     GZIP_QUEUE_SIZE_DEFAULT: int = 1000
 
-    def __init__(self,  gzip_file: typing.TextIO, line_queue: Queue):
+    def __init__(self, gzip_file: typing.TextIO, line_queue: Queue):
         super().__init__()
         self.gzip_file = gzip_file
         self.line_queue = line_queue
 
     def run(self):
         while True:
-            line: typing.Optional[str] =  self.line_queue.get()
-            if line is None: # This is the plug.
+            line: typing.Optional[str] = self.line_queue.get()
+            if line is None:  # This is the plug.
                 self.gzip_file.close()
-                return # Exit the process.
+                return  # Exit the process.
             self.gzip_file.write(line)
 
     # Called from the parent process.
@@ -39,8 +39,9 @@ class GzipProcess(Process):
 
     # Called from the parent process.
     def close(self):
-        self.line_queue.put(None) # Send the plug.
-        self.join() # Wait for the plug to exit the process.
+        self.line_queue.put(None)  # Send the plug.
+        self.join()  # Wait for the plug to exit the process.
+
 
 # This helper class supports running gunzip in parallel.
 #
@@ -55,7 +56,7 @@ class GunzipProcess(Process, ClosableIter[str]):
 
     GZIP_QUEUE_SIZE_DEFAULT: int = 1000
 
-    def __init__(self,  gzip_file: typing.TextIO, line_queue: Queue):
+    def __init__(self, gzip_file: typing.TextIO, line_queue: Queue):
         super().__init__()
         self.gzip_file = gzip_file
         self.line_queue = line_queue
@@ -64,19 +65,18 @@ class GunzipProcess(Process, ClosableIter[str]):
         line: str
         for line in self.gzip_file:
             self.line_queue.put(line)
-        self.line_queue.put(None) # Plug the queue.
+        self.line_queue.put(None)  # Plug the queue.
 
     # This is an iterator object.
-    def __iter__(self)-> typing.Iterator[str]:
+    def __iter__(self) -> typing.Iterator[str]:
         return self
-    
-    def __next__(self)->str:
+
+    def __next__(self) -> str:
         line: typing.Optional[str] = self.line_queue.get()
-        if line is None: # Have we reached the plug?
+        if line is None:  # Have we reached the plug?
             raise StopIteration
         else:
             return line
 
     def close(self):
         self.gzip_file.close()
-

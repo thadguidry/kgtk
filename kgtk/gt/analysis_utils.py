@@ -5,7 +5,7 @@ from collections import defaultdict
 
 import matplotlib.pyplot as plt  # type: ignore
 
-plt.rcParams.update({'font.size': 12})
+plt.rcParams.update({"font.size": 12})
 
 import seaborn as sns  # type: ignore
 
@@ -13,6 +13,7 @@ sns.set_style("whitegrid")
 
 
 #### BASIC STATS ####
+
 
 def get_num_nodes(g):
     return g.num_vertices()
@@ -23,6 +24,7 @@ def get_num_edges(g):
 
 
 #### DEGREES ####
+
 
 def compute_avg_node_degree(g, direction):
     return gtmain.stats.vertex_average(g, direction)
@@ -36,7 +38,7 @@ def get_degree_maxn_counts(g, direction):
     return list(compute_node_degree_hist(g, direction)[0])[:10]
 
 
-def plot_degrees(degrees, plottype='loglog', base=10, xlabel='', ylabel='', title=''):
+def plot_degrees(degrees, plottype="loglog", base=10, xlabel="", ylabel="", title=""):
     plt.loglog(degrees, basex=base, basey=base)
     plt.ylabel(ylabel)
     plt.xlabel(xlabel)
@@ -46,13 +48,14 @@ def plot_degrees(degrees, plottype='loglog', base=10, xlabel='', ylabel='', titl
 
 #### CENTRALITY ####
 
+
 def compute_betweenness(g):
     bn, be = gtmain.centrality.betweenness(g)
     return bn, be
 
 
 def compute_pagerank(g):
-    v_pr = g.new_vertex_property('float')
+    v_pr = g.new_vertex_property("float")
     gtmain.centrality.pagerank(g, prop=v_pr)
     return v_pr
 
@@ -69,7 +72,7 @@ def get_max_node(g, prop):
         vertex_pr = g.vp[prop][v]
         if vertex_pr > max_pr:
             max_pr = vertex_pr
-            max_pr_vertex = g.vp['_graphml_vertex_id'][v]
+            max_pr_vertex = g.vp["_graphml_vertex_id"][v]
 
     return max_pr, max_pr_vertex
 
@@ -85,18 +88,19 @@ def get_topn_indices(g, prop, n, print_prop):
 
 #### RUN ALL STATS ####
 
+
 def compute_stats(g, direction):
     avg_degree, stdev_degree = compute_avg_node_degree(g, direction)
     return {
-        'num_nodes': get_num_nodes(g),
-        'num_edges': get_num_edges(g),
-        'avg_degree': avg_degree,
-        'degree_maxn_counts': get_degree_maxn_counts(g, direction),
-        'stdev_degree': stdev_degree
+        "num_nodes": get_num_nodes(g),
+        "num_edges": get_num_edges(g),
+        "avg_degree": avg_degree,
+        "degree_maxn_counts": get_degree_maxn_counts(g, direction),
+        "stdev_degree": stdev_degree,
     }
 
 
-def get_topN_relations(g, N=10, pred_property='predicate'):
+def get_topN_relations(g, N=10, pred_property="predicate"):
     rel_freq = defaultdict(int)
     for i, e in enumerate(g.edges()):
         r = g.edge_properties[pred_property][e]

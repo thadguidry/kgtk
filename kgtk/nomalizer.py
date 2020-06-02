@@ -2,15 +2,15 @@ import re
 import string
 
 
-white_space_regex = re.compile('\\s+')
-punct_trans_table = dict((ord(char), ord(' ')) for char in string.punctuation)
+white_space_regex = re.compile("\\s+")
+punct_trans_table = dict((ord(char), ord(" ")) for char in string.punctuation)
 
 
 def normalize_whitespace(text):
     """Strip surrounding whitespace and normalize all other whitespace to single spaces.
     """
     text = str(text)
-    return re.sub(white_space_regex, ' ', text).strip()
+    return re.sub(white_space_regex, " ", text).strip()
 
 
 def normalize_punctuation(text):

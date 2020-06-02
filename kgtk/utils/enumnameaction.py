@@ -1,6 +1,7 @@
 from argparse import Action
 from enum import Enum
 
+
 class EnumNameAction(Action):
     """
     Argparse action for handling Enums
@@ -8,6 +9,7 @@ class EnumNameAction(Action):
     Adapted from:
     https://stackoverflow.com/questions/43968006/support-for-enum-arguments-in-argparse
     """
+
     def __init__(self, **kwargs):
         # Pop off the type value
         enum = kwargs.pop("type", None)
@@ -30,6 +32,7 @@ class EnumNameAction(Action):
         enum = self._enum[values]
         setattr(namespace, self.dest, enum)
 
+
 class EnumLowerNameAction(Action):
     """
     Argparse action for handling Enums, presenting the choices in lower case
@@ -41,6 +44,7 @@ class EnumLowerNameAction(Action):
     https://stackoverflow.com/questions/27616778/case-insensitive-argparse-choices
 
     """
+
     class cilist(list):
         def __contains__(self, other):
             # Convert to lower case for the comparison, since

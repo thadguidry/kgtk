@@ -1,16 +1,16 @@
 import abc
 import typing
 
-T = typing.TypeVar('T')
+T = typing.TypeVar("T")
+
 
 class ClosableIter(typing.Generic[T], metaclass=abc.ABCMeta):
-
     @abc.abstractmethod
-    def __iter__(self)->typing.Iterator[T]:
+    def __iter__(self) -> typing.Iterator[T]:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def __next__(self)->T:
+    def __next__(self) -> T:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -23,10 +23,10 @@ class ClosableIterTextIOWrapper(ClosableIter[str]):
         super().__init__()
         self.s = s
 
-    def __iter__(self)->typing.Iterator[str]:
+    def __iter__(self) -> typing.Iterator[str]:
         return self
 
-    def __next__(self)->str:
+    def __next__(self) -> str:
         return self.s.__next__()
 
     def close(self):

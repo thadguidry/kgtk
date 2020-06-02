@@ -13,8 +13,8 @@ def parser():
     Parameters: https://docs.python.org/3/library/argparse.html#argparse.ArgumentParser
     """
     return {
-        'help': 'this is ticker',
-        'description': 'it attaches current datetime to stdin'
+        "help": "this is ticker",
+        "description": "it attaches current datetime to stdin",
     }
 
 
@@ -22,7 +22,7 @@ def add_arguments(parser: KGTKArgumentParser):
     """
     Parse arguments
     """
-    parser.add_argument('-i', '--indent', action='count', default=0, help='indentation')
+    parser.add_argument("-i", "--indent", action="count", default=0, help="indentation")
 
 
 def run(indent):
@@ -34,5 +34,6 @@ def run(indent):
     # import modules locally
     import sys
     from datetime import datetime
+
     sys.stdout.write(sys.stdin.read())
-    sys.stdout.write('{}{}\n'.format('>' * indent, datetime.now()))
+    sys.stdout.write("{}{}\n".format(">" * indent, datetime.now()))

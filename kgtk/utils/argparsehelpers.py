@@ -25,8 +25,8 @@ def optional_bool(value) -> typing.Optional[bool]:
         return None
     if isinstance(value, bool):
         return value
-    if value.lower() in {'false', 'f', '0', 'no', 'n'}:
+    if value.lower() in {"false", "f", "0", "no", "n"}:
         return False
-    elif value.lower() in {'true', 't', '1', 'yes', 'y'}:
+    elif value.lower() in {"true", "t", "1", "yes", "y"}:
         return True
-    raise KGTKArgumentParseException(f'{value} is not a valid boolean value')
+    raise KGTKArgumentParseException(f"{value} is not a valid boolean value")

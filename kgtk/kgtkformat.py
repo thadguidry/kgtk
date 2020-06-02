@@ -7,6 +7,7 @@ from enum import Enum, unique
 import sys
 import typing
 
+
 class KgtkFormat:
     COLUMN_SEPARATOR: str = "\t"
     COMMENT_INDICATOR: str = "#"
@@ -15,7 +16,12 @@ class KgtkFormat:
     # These are the required columns in an edge file:
     NODE1_COLUMN_NAMES: typing.List[str] = ["node1", "from", "subject"]
     NODE2_COLUMN_NAMES: typing.List[str] = ["node2", "to", "object"]
-    LABEL_COLUMN_NAMES: typing.List[str] = ["label", "predicate", "relation", "relationship"]
+    LABEL_COLUMN_NAMES: typing.List[str] = [
+        "label",
+        "predicate",
+        "relation",
+        "relationship",
+    ]
 
     # There is only one required column in a node file:
     ID_COLUMN_NAMES: typing.List[str] = ["id", "ID"]
@@ -34,12 +40,12 @@ class KgtkFormat:
         BOOLEAN = 9
         SYMBOL = 10
 
-        def lower(self)->str:
+        def lower(self) -> str:
             return self.name.lower()
 
         @classmethod
-        def choices(cls)->typing.List[str]:
-            results: typing.List[str] = [ ]
+        def choices(cls) -> typing.List[str]:
+            results: typing.List[str] = []
             name: str
             for name in cls.__members__.keys():
                 results.append(name.lower())

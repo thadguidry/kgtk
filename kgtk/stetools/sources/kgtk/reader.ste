@@ -1,0 +1,1066 @@
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: STELLA; Base: 10. -*-
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;; BEGIN LICENSE BLOCK ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                                                            ;
+; Copyright (C) 2020                                                         ;
+; UNIVERSITY OF SOUTHERN CALIFORNIA, INFORMATION SCIENCES INSTITUTE          ;
+; 4676 Admiralty Way, Marina Del Rey, California 90292, U.S.A.               ;
+;                                                                            ;
+; Permission is hereby granted, free of charge, to any person obtaining      ;
+; a copy of this software and associated documentation files (the            ;
+; "Software"), to deal in the Software without restriction, including        ;
+; without limitation the rights to use, copy, modify, merge, publish,        ;
+; distribute, sublicense, and/or sell copies of the Software, and to         ;
+; permit persons to whom the Software is furnished to do so, subject to      ;
+; the following conditions:                                                  ;
+;                                                                            ;
+; The above copyright notice and this permission notice shall be             ;
+; included in all copies or substantial portions of the Software.            ;
+;                                                                            ;
+; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,            ;
+; EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF         ;
+; MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND                      ;
+; NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE     ;
+; LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION     ;
+; OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION      ;
+; WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.            ;
+;                                                                            ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;; END LICENSE BLOCK ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;;; Support for parsing and importing data from tab-separated KGTK files
+
+(in-package "STELLA")
+
+(in-module "KGTK")
+
+
+;;; KGTK syntax:
+;;; - derived from kojak/common/csv.ste
+;;; - lines whose first non-whitespace character is `#' are treated as comments
+;;; - blank, all whitespace lines are ignored.
+;;; - TAB separates values
+;;; - `|' separate multi-values; these are treated just like TAB in all aspects
+;;;   except that they generate an `|' token so we can perform appropriate parsing actions.
+;;; - leading whitespace is ignored (for now, we might have to tighten that up)
+;;; - trailing whitespace to the next separator or end of line is significant
+;;; - `\' can be used to escape significant TABs, `|'s or line endings
+;;; - TAB followed by another TAB or end of line generate empty values
+
+;;; Format extensions/clarifications compared to whats in the doc:
+;;; - regular and lang-qualified strings do not need to escape quotes in their bodies,
+;;;   but if they do as is currently mandated, it is harmless
+;;; - dimensioned values should possibly have a mandatory space after the number for some
+;;;   easier parsing by non-KGTK tools (otherwise 0x2 0b2 0o2 10e2 could all also be dimensioned)
+;;; - we cannot fully parse ISO date/times, their validation needs to be done separately
+;;;   (if at all)
+;;; - we currently allow leading white space at the beginning of values, we should probably
+;;;   turn that off
+;;; - we do not fully follow the Python spec for numeric literals, we do not allow _ in
+;;;   digits to group them, we only allow bxo based literals, and we do not distinguish
+;;;   between regular and long integers
+;;; - based numbers such as 0b10101 cannot be dimensioned, dimensioned numbers always use base 10
+;;; - we currently don't enforce proper digit alphabets for based numbers
+;;; - is the dash in 3-letter language codes as in 'deutsch'@de- legal?  it turns out those
+;;;   are from subcodes such as de-ch, need to clarify whether those should be legal or not
+;;; - we need to check that multi-values only occur in certain columns (or only in at most one)
+;;; - backslashes in strings need to be escaped (e.g., latex formulas)
+
+
+(defglobal *kgtk-tokenizer-table-definition* CONS
+  (bquote
+   (
+    (:start
+       ! "#" :comment
+       ! #\space :start
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       * #\tab :separator
+       :eof :eof
+       * "\\" :value-escape
+       * "\"" :string-body
+       * "'"  :lq-string-body
+       * "@"  :lat-long1-sign
+       * "^"  :date-time0
+       * "-+" :number-sign
+       * "."  :number-fraction0
+       * "!"  :other-literal0
+       * "123456789" :number
+       * "0" (:number-base-x0 :number)
+       * :otherwise :value)
+
+      (:comment
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :comment)
+
+      (:end-of-line-cr
+       #\linefeed :end-of-line
+       ! "#" :comment
+       ! #\space :start
+       * #\tab :separator
+       :eof :eof
+       * "\\" :value-escape
+       * "\"" :string-body
+       * "'"  :lq-string-body
+       * "@"  :lat-long1-sign
+       * "^"  :date-time0
+       * "-+" :number-sign
+       * "."  :number-fraction0
+       * "!"  :other-literal0
+       * "123456789" :number
+       * "0" (:number-base-x0 :number)
+       * :otherwise :value)
+
+      (:end-of-line
+       :include :start)
+
+      (:separator
+       ! #\space :separator
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       * #\tab :separator
+       * "\\" :value-escape
+       * "\"" :string-body
+       * "'" :lq-string-body
+       * "@" :lat-long1-sign
+       * "^" :date-time0
+       * "-+" :number-sign
+       * "."  :number-fraction0
+       * "!"  :other-literal0
+       * "123456789" :number
+       * "0" (:number-base-x0 :number)
+       * :otherwise :value)
+
+      (:multi-value
+       :include :separator)
+
+      ;;; symbols:
+      (:value
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       "\\" :value-escape
+       :otherwise :value)
+
+      (:escaped-value
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       "\\" :value-escape
+       :otherwise :escaped-value)
+
+      (:value-escape
+       :eof :error
+       :otherwise :escaped-value)
+
+      ;;; double-quoted strings:
+      (:string-body
+       "\\" :string-escape
+       "\"" :string
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :string-body)
+
+      (:string
+       "\\" :string-escape
+       "\"" :string
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :string-body)
+
+      (:string-escape
+       :eof :error
+       :otherwise :escaped-string-body)
+
+      (:escaped-string-body
+       "\\" :string-escape
+       "\"" :escaped-string
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :escaped-string-body)
+
+      (:escaped-string
+       "\\" :string-escape
+       "\"" :escaped-string
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :escaped-string-body)
+
+      ;; single-quoted language-qualified strings with 2 or 3-letter tag:
+      (:lq-string-body
+       "\\" :lq-string-escape
+       "'"  :lq-string-close
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :lq-string-body)
+
+      (:lq-string-close
+       "\\" :lq-string-escape
+       "'"  :lq-string-close
+       "@"  :lq-string0
+       #\tab :error
+       (#\linefeed #\return) :eol-error
+       "|" :error
+       :eof :error
+       :otherwise :lq-string-body)
+
+      (:lq-string0
+       "abcdefghijklmnopqrstuvwxyz" :lq-string1
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:lq-string1
+       "abcdefghijklmnopqrstuvwxyz" :lq-string
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:lq-string
+       ;; lenient wrt sub-language tags:
+       "-abcdefghijklmnopqrstuvwxyz" (:lq-string3 :lq-string)
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:lq-string3
+       ;; lenient wrt sub-language tags:
+       "-abcdefghijklmnopqrstuvwxyz" (:lq-string3 :lq-string)
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:lq-string-escape
+       :eof :error
+       :otherwise :escaped-lq-string-body)
+
+      (:escaped-lq-string-body
+       "\\" :lq-string-escape
+       "'"  :escaped-lq-string-close
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :escaped-lq-string-body)
+
+      (:escaped-lq-string-close
+       "\\" :lq-string-escape
+       "'"  :escaped-lq-string-close
+       "@"  :escaped-lq-string0
+       #\tab :error
+       (#\linefeed #\return) :eol-error
+       "|" :error
+       :eof :error
+       :otherwise :escaped-lq-string-body)
+
+      (:escaped-lq-string0
+       "abcdefghijklmnopqrstuvwxyz" :escaped-lq-string1
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:escaped-lq-string1
+       "abcdefghijklmnopqrstuvwxyz" :escaped-lq-string
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:escaped-lq-string
+       ;; lenient wrt sub-language tags:
+       "-abcdefghijklmnopqrstuvwxyz" (:escaped-lq-string3 :escaped-lq-string)
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:escaped-lq-string3
+       ;; lenient wrt sub-language tags:
+       "-abcdefghijklmnopqrstuvwxyz" (:escaped-lq-string3 :escaped-lq-string)
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      
+      ;; lat/long: @+123.456/-234.789
+      ;; FIXME: this isn't quite right wrt optional signs, but needs extra states:
+      (:lat-long1-sign
+       "+-0123456789" :lat-long1
+       "." :lat-long1-fraction
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:lat-long1
+       "0123456789" :lat-long1
+       "." :lat-long1-fraction
+       "/" :lat-long2-sign
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:lat-long1-fraction
+       "0123456789" :lat-long1-fraction
+       "/" :lat-long2-sign
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:lat-long2-sign
+       "+-0123456789" (:lat-long2 :lat-long)
+       "." :lat-long
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:lat-long2
+       "0123456789" (:lat-long2 :lat-long)
+       "." :lat-long
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:lat-long
+       "0123456789" :lat-long
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      ;; date/time/durations according to ISO 8601 followed by optional precision;
+      ;; this format is complex, so here we only enforce a basic character set and
+      ;; a minimal length of 1:
+      (:date-time0
+       "0123456789" :date-time
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :date-time
+       "+-.,:/" :date-time
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:date-time
+       "0123456789" :date-time
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :date-time
+       "+-.,:/" :date-time
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      ;; numbers and dimensioned values:
+      (:number-sign
+       "123456789" :number
+       "0" (:number-base-x0 :number)
+       "." :number-fraction0
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:number-base-x0
+       "bBoOxX" :number-base-x1
+       "0123456789" :number
+       "." (:number-fraction :number)
+       "eE" :number-exponent-or-si-unit
+       "[" :number-tolerance0
+       "Q" :quantity-pnode-or-si-unit
+       "ACDFGHIJKLMNPRSTUVWYZ" :quantity-si-unit
+       "acdfghijklmnpqrstuvwyz" :quantity-si-unit
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      ;; TO DO: we need to enforce base-specific digit alphabets:
+      (:number-base-x1
+       "0123456789aAbBcCdDeEfF" :number-base-x
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:number-base-x
+       "0123456789aAbBcCdDeEfF" :number-base-x
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:number
+       "0123456789" :number
+       "." (:number-fraction :number)
+       "eE" :number-exponent-or-si-unit
+       "[" :number-tolerance0
+       "Q" :quantity-pnode-or-si-unit
+       "ABCDFGHIJKLMNOPRSTUVWXYZ" :quantity-si-unit
+       "abcdfghijklmnopqrstuvwxyz" :quantity-si-unit
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:number-fraction0
+       "0123456789" (:number-fraction :number)
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+      
+      (:number-fraction
+       "0123456789" (:number-fraction :number)
+       "eE" :number-exponent-or-si-unit
+       "[" :number-tolerance0
+       "Q" :quantity-pnode-or-si-unit
+       "ABCDFGHIJKLMNOPRSTUVWXYZ" :quantity-si-unit
+       "abcdfghijklmnopqrstuvwxyz" :quantity-si-unit
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:number-exponent-or-si-unit
+       "+-" :number-exponent1
+       "0123456789" (:number-exponent :number)
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :quantity-si-unit
+       "abcdefghijklmnopqrstuvwxyz" :quantity-si-unit
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+      
+      (:number-exponent1
+       "0123456789" (:number-exponent :number)
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:number-exponent
+       "0123456789" (:number-exponent :number)
+       "[" :number-tolerance0
+       "Q" :quantity-pnode-or-si-unit
+       "ABCDEFGHIJKLMNOPRSTUVWXYZ" :quantity-si-unit
+       "abcdefghijklmnopqrstuvwxyz" :quantity-si-unit
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      ;; we currently don't tokenize the tolerance interval, we just check for basic charset:
+      (:number-tolerance0
+       "0123456789" :number-tolerance1
+       "+-.,eE" :number-tolerance1
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:number-tolerance1
+       "0123456789" :number-tolerance1
+       "+-.,eE" :number-tolerance1
+       "]" :number-tolerance
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:number-tolerance
+       "Q" :quantity-pnode-or-si-unit
+       "ABCDEFGHIJKLMNOPRSTUVWXYZ" :quantity-si-unit
+       "abcdefghijklmnopqrstuvwxyz" :quantity-si-unit
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:quantity-pnode-or-si-unit
+       "0123456789" :quantity-pnode-unit
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :quantity-si-unit
+       "abcdefghijklmnopqrstuvwxyz" :quantity-si-unit
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      (:quantity-pnode-unit
+       "0123456789" :quantity-pnode-unit
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      (:quantity-si-unit0
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :quantity-si-unit
+       "abcdefghijklmnopqrstuvwxyz" :quantity-si-unit
+       (#\linefeed #\return) :eol-error
+       :otherwise :error)
+
+      ;; we only do minimal parsing of SI units, checking for charset mostly:
+      (:quantity-si-unit
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :quantity-si-unit
+       "abcdefghijklmnopqrstuvwxyz" :quantity-si-unit
+       "0123456789" :quantity-si-unit
+       "./" :quantity-si-unit0
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :error)
+
+      ;; other and typed literals: !P1..3W^timex3,  !1000^^dbpedia:USD
+      (:other-literal0
+       "\\" :other-literal-escape1
+       "^" :error
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :other-literal1)
+
+      (:other-literal-escape1
+       :eof :error
+       :otherwise :other-literal1)
+
+      (:other-literal1
+       "\\" :other-literal-escape1
+       "^" :other-literal-sep0
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :other-literal1)
+
+      (:other-literal-sep0
+       "^" :typed-literal0
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :other-literal)
+
+      (:other-literal
+       "\\" :other-literal-escape
+       "^" :error
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :other-literal)
+
+      (:other-literal-escape
+       :eof :error
+       :otherwise :other-literal)
+
+      (:typed-literal0
+       "\\" :typed-literal-escape
+       "^" :error
+       (#\tab #\|) :error
+       (#\linefeed #\return) :eol-error
+       :eof :error
+       :otherwise :typed-literal)
+
+      (:typed-literal
+       "\\" :typed-literal-escape
+       "^" :error
+       * #\tab :separator
+       * "|" :multi-value
+       * #\linefeed :end-of-line
+       * #\return (:end-of-line-cr :end-of-line)
+       :eof :eof
+       :otherwise :typed-literal)
+
+      (:typed-literal-escape
+       :eof :error
+       :otherwise :typed-literal)
+
+      ;; we need to capture if an error happened right when we consumed
+      ;; an EOL char so we can keep the line count accurate in that case:
+      (:eol-error
+       :include :start)
+
+      (:error
+       :include :start))))
+
+
+(defglobal *kgtk-tokenizer-table* TOKENIZER-TABLE
+           (parse-tokenizer-definition *kgtk-tokenizer-table-definition*))
+
+(defun (tokenize-kgtk-string CONS) ((text STRING))
+  ;; Test driver to test out the KGTK tokenizer table.
+  (let ((result NIL))
+    (foreach token in (new STREAM-TOKENIZER
+                           :stream (new STRING-INPUT-STREAM :the-string text)
+                           :table *kgtk-tokenizer-table*)
+        collect (cons-list (content token) (type token)) into result)
+    (return result)))
+
+
+;; TO DO:
+;; - the current iterator version below supports error checking and writing out validated output
+;;   to be passed to follow-on operations (e.g. sort)
+;; - we should create a variant that doesn't write out validated output for some extra speed
+;; - we should also create a more general reader variant that generates typed, unescaped
+;;   values parsed into fields; this might require a parallel output array with offset/type info
+
+(defclass KGTK-VALIDATION-ITERATOR (ABSTRACT-ITERATOR)
+  :documentation "Tokenizing iterator that iterates over KGTK files and checks the syntax of
+fields and consistency of columns and outputs error messages and validated output.  Generated
+output omits all commented and blank lines.  No deeper semantic checks are performed such as
+validity of times, language tags, locations, etc."
+  :parameters ((any-value :type STRING-BUFFER))
+  :slots ((input-stream :type INPUT-STREAM :initially NULL)
+          (log-stream :type OUTPUT-STREAM :initially NULL)
+          (invalid-stream :type OUTPUT-STREAM :initially NULL)
+          (suppress-header? :type BOOLEAN :initially FALSE
+            :documentation "If true, the header row will be suppresed in any output.")
+          (invalid-value-action :type KEYWORD :initially :PASS)
+          (error-limit :type INTEGER :initially 1000)
+          (chunk-size :type INTEGER :initially 1000
+            :documentation "Number of rows to read at a time.")
+          (field-separator :type CHARACTER :initially #\tab)
+          (row-separator :type CHARACTER :initially #\linefeed)
+          ;; FIXME: this type seems to run us into memory corruption problems, e.g., when
+          ;; we call `kpi.testKgtkValidationIterator2' and friends repeatedly, investigate...
+          ;(header-columns :type (VECTOR-SEQUENCE OF STRING-WRAPPER)
+          ;                :initially (new VECTOR-SEQUENCE :array-size 16))
+          ;; use LIST for now:
+          (header-columns :type (LIST OF STRING-WRAPPER) :initially (new LIST))
+          (line-number :type INTEGER :initially 0)
+          (buffer :renames value :type STRING-BUFFER :initially (new STRING-BUFFER))
+          ))
+
+(defglobal *max-number-of-columns* INTEGER (expt 2 16)
+  :documentation "Maximum number of columns allowed to guards against run-aways."
+  :public? TRUE)
+
+(defmethod (number-of-columns INTEGER) ((self KGTK-VALIDATION-ITERATOR))
+  :documentation "Number of columns as determined by the header line.  If the header has not been parsed
+yet, this will be 0."
+  :public? TRUE
+  (return (length (header-columns self))))
+
+(defun (allocate-kgtk-validation-iterator KGTK-VALIDATION-ITERATOR) ((file STRING) (logFile STRING) (invalidFile STRING))
+  :documentation "Allocate a KGTK iterator given relevant input and output files.  If files are left unspecified,
+relevant standard input and error streams will be used."
+  :public? TRUE
+  ;; TO DO: this will go away or be generalized once we can wrap Python streams
+  (let ((iter (new KGTK-VALIDATION-ITERATOR :input-stream STANDARD-INPUT :log-stream STANDARD-ERROR)))
+    (if (defined? file)
+        (setf (input-stream iter) (new FILE-INPUT-STREAM :filename file))
+      (setf (input-stream iter) STANDARD-INPUT))
+    ;; ensure block buffering for efficiency as well as to avoid a STELLA bug in `read-into-tokenizer-buffer':
+    (setf (buffering-scheme (input-stream iter)) :BLOCK)
+    (if (defined? logFile)
+        (setf (log-stream iter) (new FILE-OUTPUT-STREAM :filename logFile))
+      (setf (log-stream iter) STANDARD-ERROR))
+    (when (defined? invalidFile)
+      (setf (invalid-stream iter) (new FILE-OUTPUT-STREAM :filename invalidFile)))
+    (return iter)))
+
+(defmethod process-header ((self KGTK-VALIDATION-ITERATOR))
+  :documentation "Finish processing header information assuming the end of the first content line
+has just been reached.  Raises errors in some situations, e.g., if this isn't the first line of
+the stream, or if there were any syntax problems in the header elements."
+  :public? TRUE
+  (when (> (line-number self) 0)
+    ;; from this we cannot continue:
+    (signal-read-error "KGTK header is not in first line but line: " (1+ (line-number self))))
+  (let ((headerLine (the-string (buffer self)))
+        (columns (split-string headerLine #\tab))
+        (header (header-columns self)))
+    (foreach col in columns
+        do (insert header col))
+    (reverse header) ;; assuming LIST or CONS
+    (cond ((suppress-header? self)
+           (clear (buffer self)))
+          (otherwise
+           (output-separators self (row-separator self) 1)
+           (when (defined? (invalid-stream self))
+             ;; by outputting the header here, we will get a header-only file if there are no errors:
+             (print-stream (invalid-stream self) headerLine (row-separator self)))))))
+
+(defmethod output-separators ((self KGTK-VALIDATION-ITERATOR) (sep CHARACTER) (n INTEGER))
+  :documentation "Output `n' `sep'arators to `self's buffer."
+  :public? TRUE
+  (when (>= n 1)
+    (let ((buffer (buffer self))
+          (buf (buffer buffer))
+          (fp (fill-pointer buffer)))
+      (when (< (- (buffer-size buffer) fp) n)
+        (setq buf (ensure-free-space buffer n)))
+      (while (> n 0)
+        (setf (nth buf fp) sep)
+        (++ fp)
+        (-- n))
+      (setf (fill-pointer buffer) fp))))
+
+(defmethod close ((self KGTK-VALIDATION-ITERATOR))
+  :documentation "Close any of `self's open streams and set them to NULL to signal
+that the iterator is closed."
+  :public? TRUE
+  (when (and (defined? (input-stream self))
+             (isa? (input-stream self) @FILE-INPUT-STREAM))
+    (close-stream (input-stream self))
+    (setf (input-stream self) NULL))
+  (when (and (defined? (log-stream self))
+             (isa? (log-stream self) @FILE-OUTPUT-STREAM))
+    (close-stream (log-stream self))
+    (setf (log-stream self) NULL))
+  (when (and (defined? (invalid-stream self))
+             (isa? (invalid-stream self) @FILE-OUTPUT-STREAM))
+    (close-stream (invalid-stream self))
+    (setf (invalid-stream self) NULL)))
+
+(defmethod (next? BOOLEAN) ((self KGTK-VALIDATION-ITERATOR))
+  :documentation "Validate the next `chunk-size' content lines of `self's input stream and
+write the validated result to `buffer'.  Return TRUE if at least one content line could be
+read before EOF was reached."
+  :public? TRUE
+  (when (null? (input-stream self))
+    (return FALSE))
+  (let ((buffer (value self))
+        (chunkSize (chunk-size self))
+        (lineNumber (line-number self))
+        (lineStart (fill-pointer buffer))
+        (invalidAction (invalid-value-action self))
+        (invalidLine? FALSE)
+        (nColumns (number-of-columns self))
+        (nRows 0)
+        (column 0)
+        (state :START)
+        (priorState :SEPARATOR)
+        (fieldSep (field-separator self))
+        (rowSep (row-separator self))
+        (queuedSeps 0))
+    (clear buffer)
+    (with-tokenizer *kgtk-tokenizer-table* (input-stream self)
+      (unwind-protect
+        (while (< nRows chunkSize)
+          (get-next-token FALSE)
+          (when (end-of-tokens?)
+            (close self)
+            (break))
+          (setq state (get-token-type))
+          (cond ((eql? state :SEPARATOR)
+                 (++ queuedSeps))
+                ((> queuedSeps 0)
+                 (output-separators self fieldSep queuedSeps)
+                 (++ column (1- queuedSeps))
+                 (when (eql? state :END-OF-LINE)
+                   ;; ensure we are counting the last empty column:
+                   (++ column))
+                 (setq queuedSeps 0)))
+          (when (>= column *max-number-of-columns*)
+            (signal-read-error "Line " (1+ lineNumber) ": run-away line, max number of columns exceeded"))
+          (case state
+            (:SEPARATOR NULL)
+            (:END-OF-LINE
+             (cond ((and (not (= column nColumns))
+                         (> nColumns 0)
+                         (> column 0))
+                    ;; we handle this first in case we have an invalid line with mismatched columns which
+                    ;; can also happen due to some invalid tokens (but maybe those are tokenizer bugs?):
+                    (output-separators self rowSep 1)
+                    (setf (line-number self) lineNumber)
+                    (handle-column-mismatch self lineStart column))
+                   (invalidLine?
+                    ;; if this is the header line, we will terminate:
+                    (output-separators self rowSep 1)
+                    (handle-invalid-line self lineStart)
+                    (setq invalidLine? FALSE))
+                   ((<= nColumns 0)
+                    (setf (line-number self) lineNumber)
+                    (process-header self)
+                    (setq nColumns (number-of-columns self)))
+                   ((eq? rowSep fieldSep)
+                    (++ queuedSeps))
+                   (otherwise
+                    (output-separators self rowSep 1)))
+             (++ lineNumber)
+             (when (> column 0)
+               (++ nRows))
+             (setq column 0)
+             (setq lineStart (fill-pointer buffer)))
+            ((:ESCAPED-VALUE :ESCAPED-STRING :ESCAPED-LQ-STRING)
+             ;; not unescaping (yet) in this scheme:
+             (copy-token-text buffer)
+             (unless (eql? priorState :MULTI-VALUE)
+               (++ column)))
+            (:MULTI-VALUE
+             ;; TO DO: for now we keep multi-values as a single token; if we decide to split them
+             ;; up here we need to output extra rows to keep the number of columns constant:
+             (copy-token-text buffer))
+            ((:ERROR :EOL-ERROR)
+             (save-tokenizer-stream-state)
+             (setf (line-number self) lineNumber)
+             (let ((badToken (handle-error self (get-token-type) (get-token-text) column)))
+               (cond ((eql? invalidAction :EXCLUDE)
+                      (setq badToken ""))
+                     (otherwise
+                      ;; currently we can only save invalid lines for :PASS and :EXCLUDE-LINE:
+                      (setq invalidLine? TRUE)))
+               (append-string buffer badToken))
+             (when (= (-- (error-limit self)) 0)
+               (signal-read-error "Maximum number of errors exceeded"))
+             (restore-tokenizer-stream-state)
+             (cond ((eql? state :EOL-ERROR)
+                    (if (eq? rowSep fieldSep)
+                        (++ queuedSeps)
+                      (output-separators self rowSep 1))
+                    (when invalidLine?
+                      (handle-invalid-line self lineStart)
+                      (setq invalidLine? FALSE))
+                    (++ lineNumber)
+                    (++ nRows)
+                    (setq column 0)
+                    (setq lineStart (fill-pointer buffer)))
+                   ((not (eql? priorState :MULTI-VALUE))
+                    (++ column)))
+             (when (null? (input-stream self))
+               (break)))
+            (otherwise
+             ;; a "normal" token:
+             (copy-token-text buffer)
+             (unless (eql? priorState :MULTI-VALUE)
+               (++ column))))
+          (setq priorState state))
+        (save-tokenizer-stream-state)))
+    (output-separators self fieldSep queuedSeps)
+    (setf (line-number self) lineNumber)
+    (return (> nRows 0))))
+
+;;; Not used yet:
+(defun (unescape-kgtk-token STRING) ((token STRING))
+  :documentation "Unescape an escaped KGTK value `token'."
+  :public? TRUE :globally-inline? TRUE
+  ;; FOR NOW: this doesn't do quite the right thing with character escapes:
+  (return (unescape-token-string token #\\ FALSE)))
+          
+(defmethod (handle-error STRING) ((self KGTK-VALIDATION-ITERATOR)
+                                  (tokenType KEYWORD) (tokenText STRING)
+                                  (column INTEGER))
+  :documentation "Print an error message to the log stream, advance the input to a safe state
+to continue from and return the full erroneous token or text that was skipped.  Any additional
+linenumber/column handling has to be done by the caller."
+  (let ((inp (input-stream self))
+        (linenum (1+ (line-number self)))
+        (tokenLength (length tokenText))
+        ;; since empty values are legal, we should never have an empty error token here:
+        (char (nth tokenText (1- tokenLength))))
+    (print-stream (log-stream self) "Line " linenum "[" (1+ column) "]: Bad syntax: " tokenText EOL)
+    (cond ((eql? char #\tab)
+           (return (subsequence tokenText 0 (1- tokenLength))))
+          ((eql? tokenType :EOL-ERROR)
+           (when (eql? char #\return)
+             (setq char (read-character inp))
+             (unless (eql? char #\linefeed)
+               (unread-character char inp)))
+           (return (subsequence tokenText 0 (1- tokenLength))))
+          (otherwise
+           (let ((buffer (new STRING-OUTPUT-STREAM))
+                 (maxSkip 100000)
+                 (eof? FALSE))
+             (print-stream buffer tokenText)
+             (while (> maxSkip 0)
+               (-- maxSkip)
+               (mv-setq (char eof?) (read-character inp))
+               (when eof?
+                 (close self)
+                 (return (the-string buffer)))
+               (case char
+                 ((#\tab #\linefeed #\return)
+                  (unread-character char inp)
+                  (return (the-string buffer)))
+                 (otherwise
+                  (print-stream buffer char))))
+             (signal-read-error "Line " linenum ": Runaway error token"))))))
+
+(defmethod handle-invalid-line ((self KGTK-VALIDATION-ITERATOR) (lineStart INTEGER))
+  :documentation "Complete the processing of a line that contains one or more invalid tokens.
+Writes the line to the invalid line stream if it exists, clears the line buffer if necessary
+to exclude the invalid line, and raises an error in case this was the header line."
+  (let ((buffer (buffer self))
+        (invalidStream (invalid-stream self)))
+    (when (defined? invalidStream)
+      (print-stream invalidStream (subsequence buffer lineStart (length buffer))))
+    (when (eql? (invalid-value-action self) :EXCLUDE-LINE)
+      (setf (fill-pointer buffer) lineStart))
+    (when (<= (number-of-columns self) 0)
+      (signal-read-error "Line 1: invalid header line"))))
+
+(defmethod handle-column-mismatch ((self KGTK-VALIDATION-ITERATOR) (lineStart INTEGER) (column INTEGER))
+  :documentation "Complete the processing of a line that has an incorrect number of columns.
+Writes the line to the invalid line stream if it exists, clears the line buffer if necessary
+to exclude the invalid line, and adds blank columns or removes extraneous columns if the
+invalid value action is different from :EXCLUDE-LINE."
+  (let ((buffer (buffer self))
+        (invalidStream (invalid-stream self))
+        (nColumns (number-of-columns self))
+        (linenum (1+ (line-number self)))
+        (fieldSep (field-separator self))
+        (rowSep (row-separator self)))
+    (print-stream (log-stream self) "Line " linenum ": Too " (choose (< column nColumns) "few" "many")
+                  " columns: " column EOL)
+    (when (defined? invalidStream)
+      (print-stream invalidStream (subsequence buffer lineStart (length buffer))))
+    (cond ((eql? (invalid-value-action self) :EXCLUDE-LINE)
+           (setf (fill-pointer buffer) lineStart))
+          ((< column nColumns)
+           ;; output additional empty fields, delete row separator first:
+           (-- (fill-pointer buffer))
+           (output-separators self fieldSep (- nColumns column))
+           (output-separators self rowSep 1))
+          (otherwise
+           ;; remove extraneous fields:
+           (let ((buf (buffer buffer))
+                 (cursor (fill-pointer buffer)))
+             (while (>= cursor 0)
+               (when (eql? (nth buf cursor) fieldSep)
+                 (-- column))
+               (when (= column nColumns)
+                 (setf (fill-pointer buffer) cursor)
+                 (break)))
+             (output-separators self rowSep 1))))))
+
+
+;;; Callback streams:
+
+(defclass CALLBACK-INPUT-STREAM (INPUT-STREAM)
+  :documentation "Input stream class that uses a Python callback to read chunks of data.
+`fill-read-buffer' in conjunction with `python-reader' are doing the work to fetch data
+and supplying it to the stream buffer of the underlying C++ stream object."
+  :slots ((python-stream :type PYTHON-OBJECT-POINTER)
+          (python-reader :type FUNCTION-CODE)
+          (buffer-size :type INTEGER :initially 4096)
+          (buffer :type MUTABLE-STRING)
+          ;; FIXME: `read-into-tokenizer-buffer' doesn't work right with :LINE buffering
+          (buffering-scheme :initially :BLOCK))
+  :initializer initialize-object)
+
+
+;;; The C++ input stream class below uses a customized stream buffer object which
+;;; modifies the virtual `underflow()' method which gets called whenever the current buffer
+;;; is empty.  The trick here was to provide a modified stream buffer class, since it has
+;;; virtual methods that can be overridden.  The stream classes themselves cannot be
+;;; directly specialized in this way, since they do not provide any virtual methods.
+
+(verbatim :cpp
+  "class NativeCallbackStreambuffer: public gc, public std::streambuf {
+public:
+  CallbackInputStream* callbackStream = NULL;
+
+  NativeCallbackStreambuffer(CallbackInputStream* cbstream) : std::streambuf() {
+    callbackStream = cbstream;
+  }
+
+  virtual std::streambuf::int_type underflow() {
+    //std::cout << \">>> underflow: \"<< std::endl;
+    int offset, length = 0;
+    // read the next chunk of data using fill-read-buffer:
+    char* data = (char*)callbackStream->fillReadBuffer(offset, length);
+    if (data == NULL) {
+      return traits_type::eof();
+    }
+    // crucial call that points streambuf to the location of the newly buffered data:
+    setg(data, data + offset, data + length);
+    return traits_type::to_int_type(data[0]);
+  }
+};
+
+class NativeCallbackStream: public gc, public std::istream {
+public:
+  NativeCallbackStream(CallbackInputStream* cbstream) : std::istream() {
+    // set the read buffer of this stream to our customized version:
+    rdbuf(new NativeCallbackStreambuffer(cbstream));
+  }
+};
+
+" :otherwise NULL)
+
+
+(defmethod initialize-object ((self CALLBACK-INPUT-STREAM))
+  :documentation "Initialize the native stream of 'self' with a new
+NativeCallbackInputStream and initialize or resize the buffer."
+  :public? TRUE
+  (setf (native-stream self)
+    (verbatim :cpp "new NativeCallbackStream(self)"
+              :otherwise NULL))
+  (setf (buffer self) (make-raw-mutable-string (buffer-size self))))
+
+(defmethod (fill-read-buffer MUTABLE-STRING INTEGER INTEGER) ((self CALLBACK-INPUT-STREAM))
+  :documentation "Read the next chunk of data and return its char* buffer location (pointer)
+and the relevant start and end offsets.  Return NULL when EOF is encountered.  This calls
+a `python-reader' callback on the Python side that reads data from the stream and copies
+it into the callback stream's buffer."
+  :public? TRUE
+  (let ((clen INTEGER (funcall (python-reader self) (python-stream self) (buffer self) (buffer-size self))))
+    (cond ((<= clen 0)
+           ;(print ">>> fill-read-buffer: EOF" EOL)
+           (return NULL 0 0)) ;; EOF
+          (otherwise
+           (return (buffer self) 0 clen)))))
+
+
+;;; Testing:
+
+(defun (test-kgtk-validation-iterator INTEGER) ((file STRING) (logFile STRING))
+  :documentation "Test driver."
+  :public? TRUE :command? TRUE
+  (let ((iter (allocate-kgtk-validation-iterator file logFile NULL)))
+    (while (next? iter)
+      NULL)
+    (return (line-number iter))))
+
+(defun (test-kgtk-validation-iterator2 INTEGER) ((file STRING) (logFile STRING))
+  :documentation "Test driver."
+  :public? TRUE :command? TRUE
+  (let ((iter (allocate-kgtk-validation-iterator file logFile NULL))
+        (frame NIL))
+    (ignore frame)
+    (setf (row-separator iter) #\tab)
+    (while (next? iter)
+      (setq frame (split-string (the-string (value iter)) #\tab)))
+    (return (line-number iter))))
+
+(defun test-kgtk-validation-iterator3 ((file STRING) (logFile STRING) (nLines INTEGER))
+  :documentation "Test driver."
+  :public? TRUE :command? TRUE
+  (let ((iter (allocate-kgtk-validation-iterator file logFile NULL))
+        (frame NIL)
+        (item "")
+        (cursor 0))
+    (setf (row-separator iter) #\tab)
+    (foreach batch in iter
+        do (setq frame (split-string (the-string batch) #\tab))
+           (while (non-empty? frame)
+             (setq item (unwrap-string (first frame)))
+             (when (blank-string? item)
+               (setq item "."))
+             (print item "	")
+             (++ cursor)
+             (setq frame (rest frame))
+             (when (= (mod cursor (number-of-columns iter)) 0)
+               (print EOL)
+               (-- nLines))
+             (when (<= nLines 0)
+               (close iter)
+               (return))))))

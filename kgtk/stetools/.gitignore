@@ -1,0 +1,4 @@
+_libkgtk.*
+native/
+**/.old/
+startup-system.ste

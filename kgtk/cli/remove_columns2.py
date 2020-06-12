@@ -149,7 +149,7 @@ def run(input_kgtk_file: Path,
             print("Opening the output file: %s" % str(output_kgtk_file), file=error_file, flush=True)
         kw: KgtkWriter = KgtkWriter.open(output_column_names,
                                          output_kgtk_file,
-                                         mode=KgtkWriter.Mode[kr.mode.name],
+                                         mode=kr.mode,
                                          verbose=verbose,
                                          very_verbose=very_verbose)
 

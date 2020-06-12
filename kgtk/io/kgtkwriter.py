@@ -18,13 +18,23 @@ import typing
 
 from kgtk.kgtkformat import KgtkFormat
 from kgtk.io.kgtkbase import KgtkBase
-from kgtk.io.kgtkreader import KgtkReader
+from kgtk.io.kgtkreader import KgtkReader, KgtkReaderMode
 from kgtk.utils.enumnameaction import EnumNameAction
 from kgtk.utils.gzipprocess import GzipProcess
 from kgtk.utils.validationaction import ValidationAction
 
+class KgtkWriterMode(Enum):
+    """
+    There are four file reading/writing modes:
+    """
+    NONE = 0 # Enforce neither edge nore node file required columns
+    EDGE = 1 # Enforce edge file required columns
+    NODE = 2 # Enforce node file require columns
+    AUTO = 3 # Automatically decide whether to enforce edge or node file required columns
+
 @attr.s(slots=True, frozen=False)
 class KgtkWriter(KgtkBase):
+
     GZIP_QUEUE_SIZE_DEFAULT: int = GzipProcess.GZIP_QUEUE_SIZE_DEFAULT
 
     # TODO: use an enum
@@ -89,15 +99,6 @@ class KgtkWriter(KgtkBase):
     verbose: bool = attr.ib(validator=attr.validators.instance_of(bool), default=False)
     very_verbose: bool = attr.ib(validator=attr.validators.instance_of(bool), default=False)
 
-    class Mode(Enum):
-        """
-        There are four file writing modes:
-        """
-        NONE = 0 # Enforce neither edge nor node file required columns
-        EDGE = 1 # Enforce edge file required columns
-        NODE = 2 # Enforce node file required columns
-        AUTO = 3 # Automatically decide whether to enforce edge or node file required columns
-
     @classmethod
     def open(cls,
              column_names: typing.List[str],
@@ -111,13 +112,22 @@ class KgtkWriter(KgtkBase):
              gzip_in_parallel: bool = False,
              gzip_queue_size: int = GZIP_QUEUE_SIZE_DEFAULT,
              column_separator: str = KgtkFormat.COLUMN_SEPARATOR,
-             mode: Mode = Mode.AUTO,
+             mode: typing.Union[KgtkReaderMode, KgtkWriterMode] = KgtkWriterMode.AUTO,
              output_format: typing.Optional[str] = None,
              output_column_names: typing.Optional[typing.List[str]] = None,
              old_column_names: typing.Optional[typing.List[str]] = None,
              new_column_names: typing.Optional[typing.List[str]] = None,
              verbose: bool = False,
              very_verbose: bool = False)->"KgtkWriter":
+
+        # The following dance allows the convenience of passing either a
+        # KgtkWriterMode or a KgtkReaderMode to open(...).
+        wmode: KgtkWriterMode
+        if isinstance(mode, KgtkWriterMode):
+            wmode = mode
+        elif isinstance(mode, KgtkReaderMode):
+            wmode = KgtkWriterMode[mode.name]
+
         if file_path is None or str(file_path) == "-":
             if verbose:
                 print("KgtkWriter: writing stdout", file=error_file, flush=True)
@@ -134,7 +144,7 @@ class KgtkWriter(KgtkBase):
                               gzip_in_parallel=gzip_in_parallel,
                               gzip_queue_size=gzip_queue_size,
                               column_separator=column_separator,
-                              mode=mode,
+                              mode=wmode,
                               output_format=output_format,
                               output_column_names=output_column_names,
                               old_column_names=old_column_names,
@@ -181,7 +191,7 @@ class KgtkWriter(KgtkBase):
                               gzip_in_parallel=gzip_in_parallel,
                               gzip_queue_size=gzip_queue_size,
                               column_separator=column_separator,
-                              mode=mode,
+                              mode=wmode,
                               output_format=output_format,
                               output_column_names=output_column_names,
                               old_column_names=old_column_names,
@@ -218,7 +228,7 @@ class KgtkWriter(KgtkBase):
                               gzip_in_parallel=gzip_in_parallel,
                               gzip_queue_size=gzip_queue_size,
                               column_separator=column_separator,
-                              mode=mode,
+                              mode=wmode,
                               output_format=output_format,
                               output_column_names=output_column_names,
                               old_column_names=old_column_names,
@@ -241,7 +251,7 @@ class KgtkWriter(KgtkBase):
                gzip_in_parallel: bool,
                gzip_queue_size: int,
                column_separator: str,
-               mode: Mode = Mode.AUTO,
+               mode: KgtkWriterMode = KgtkWriterMode.AUTO,
                output_format: typing.Optional[str] = None,
                output_column_names: typing.Optional[typing.List[str]] = None,
                old_column_names: typing.Optional[typing.List[str]] = None,
@@ -304,7 +314,7 @@ class KgtkWriter(KgtkBase):
         # Should we automatically determine if this is an edge file or a node file?
         is_edge_file: bool = False
         is_node_file: bool = False
-        if mode is KgtkWriter.Mode.AUTO:
+        if mode is KgtkWriterMode.AUTO:
             # If we have a node1 (or alias) column, then this must be an edge file. Otherwise, assume it is a node file.
             node1_idx: int = cls.get_column_idx(cls.NODE1_COLUMN_NAMES, output_column_name_map,
                                                 header_line=header,
@@ -314,11 +324,11 @@ class KgtkWriter(KgtkBase):
                                                 is_optional=True)
             is_edge_file = node1_idx >= 0
             is_node_file = not is_edge_file
-        elif mode is KgtkWriter.Mode.EDGE:
+        elif mode is KgtkWriterMode.EDGE:
             is_edge_file = True
-        elif mode is KgtkWriter.Mode.NODE:
+        elif mode is KgtkWriterMode.NODE:
             is_node_file = True
-        elif mode is KgtkWriter.Mode.NONE:
+        elif mode is KgtkWriterMode.NONE:
             pass
         
         # Validate that we have the proper columns for an edge or node file,
@@ -574,9 +584,9 @@ def main():
                               type=ValidationAction, action=EnumNameAction, default=ValidationAction.EXIT)
     parser.add_argument(      "--gzip-in-parallel", dest="gzip_in_parallel", help="Execute gzip in a subthread.", action='store_true')
     parser.add_argument(      "--input-mode", dest="input_mode",
-                              help="Determine the input KGTK file mode.", type=KgtkReader.Mode, action=EnumNameAction, default=KgtkReader.Mode.AUTO)
+                              help="Determine the input KGTK file mode.", type=KgtkReaderMode, action=EnumNameAction, default=KgtkReaderMode.AUTO)
     parser.add_argument(      "--output-mode", dest="output_mode",
-                              help="Determine the output KGTK file mode.", type=KgtkWriter.Mode, action=EnumNameAction, default=KgtkWriter.Mode.AUTO)
+                              help="Determine the output KGTK file mode.", type=KgtkWriterMode, action=EnumNameAction, default=KgtkWriterMode.AUTO)
     parser.add_argument(      "--output-format", dest="output_format", help="The file format (default=kgtk)", type=str)
     parser.add_argument(      "--output-columns", dest="output_column_names", help="Rename all output columns. (default=%(default)s)", type=str, nargs='+')
     parser.add_argument(      "--old-columns", dest="old_column_names", help="Rename seleted output columns: old names. (default=%(default)s)", type=str, nargs='+')

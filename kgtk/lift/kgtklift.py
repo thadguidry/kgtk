@@ -319,7 +319,7 @@ class KgtkLift(KgtkFormat):
             print("Opening the output file: %s" % self.output_file_path, file=self.error_file, flush=True)
         ew: KgtkWriter = KgtkWriter.open(output_column_names,
                                          self.output_file_path,
-                                         mode=KgtkWriter.Mode[ikr.mode.name],
+                                         mode=ikr.mode,
                                          require_all_columns=False,
                                          prohibit_extra_columns=True,
                                          fill_missing_columns=True,

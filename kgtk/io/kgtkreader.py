@@ -40,7 +40,7 @@ from kgtk.value.kgtkvalueoptions import KgtkValueOptions, DEFAULT_KGTK_VALUE_OPT
 
 class KgtkReaderMode(Enum):
     """
-    There are four file reading modes:
+    There are four file reading/writing modes:
     """
     NONE = 0 # Enforce neither edge nore node file required columns
     EDGE = 1 # Enforce edge file required columns

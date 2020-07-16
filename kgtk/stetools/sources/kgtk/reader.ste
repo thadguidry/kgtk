@@ -707,10 +707,10 @@ the stream, or if there were any syntax problems in the header elements."
           (fp (fill-pointer buffer)))
       (when (< (- (buffer-size buffer) fp) n)
         (setq buf (ensure-free-space buffer n)))
-      (while (> n 0)
+      (setq n (+ fp n))
+      (while (< fp n)
         (setf (nth buf fp) sep)
-        (++ fp)
-        (-- n))
+        (++ fp))
       (setf (fill-pointer buffer) fp))))
 
 (defmethod close ((self KGTK-VALIDATION-ITERATOR))
@@ -740,7 +740,7 @@ read before EOF was reached."
   (let ((buffer (value self))
         (chunkSize (chunk-size self))
         (lineNumber (line-number self))
-        (lineStart (fill-pointer buffer))
+        (lineStart 0)
         (invalidAction (invalid-value-action self))
         (invalidLine? FALSE)
         (nColumns (number-of-columns self))
@@ -864,8 +864,9 @@ linenumber/column handling has to be done by the caller."
   (let ((inp (input-stream self))
         (linenum (1+ (line-number self)))
         (tokenLength (length tokenText))
-        ;; since empty values are legal, we should never have an empty error token here:
         (char (nth tokenText (1- tokenLength))))
+    ;; since empty values are legal, we should never have an empty error token here - but just in case:
+    (safety 1 (> tokenLength 0) "INTERNAL ERROR: handle-error: unexpected empty token")
     (print-stream (log-stream self) "Line " linenum "[" (1+ column) "]: Bad syntax: " tokenText EOL)
     (cond ((eql? char #\tab)
            (return (subsequence tokenText 0 (1- tokenLength))))
@@ -900,10 +901,12 @@ Writes the line to the invalid line stream if it exists, clears the line buffer 
 to exclude the invalid line, and raises an error in case this was the header line."
   (let ((buffer (buffer self))
         (invalidStream (invalid-stream self)))
+    (safety 1 (<= lineStart (length buffer))
+            "INTERNAL ERROR: handle-invalid-line: lineStart > bufferLength: " lineStart " " (length buffer))
     (when (defined? invalidStream)
       (print-stream invalidStream (subsequence buffer lineStart (length buffer))))
     (when (eql? (invalid-value-action self) :EXCLUDE-LINE)
-      (setf (fill-pointer buffer) lineStart))
+      (setf (length buffer) lineStart))
     (when (<= (number-of-columns self) 0)
       (signal-read-error "Line 1: invalid header line"))))
 
@@ -918,12 +921,14 @@ invalid value action is different from :EXCLUDE-LINE."
         (linenum (1+ (line-number self)))
         (fieldSep (field-separator self))
         (rowSep (row-separator self)))
+    (safety 1 (<= lineStart (length buffer))
+            "INTERNAL ERROR: handle-column-mismatch: lineStart > bufferLength: " lineStart " " (length buffer))
     (print-stream (log-stream self) "Line " linenum ": Too " (choose (< column nColumns) "few" "many")
                   " columns: " column EOL)
     (when (defined? invalidStream)
       (print-stream invalidStream (subsequence buffer lineStart (length buffer))))
     (cond ((eql? (invalid-value-action self) :EXCLUDE-LINE)
-           (setf (fill-pointer buffer) lineStart))
+           (setf (length buffer) lineStart))
           ((< column nColumns)
            ;; output additional empty fields, delete row separator first:
            (-- (fill-pointer buffer))
@@ -937,12 +942,15 @@ invalid value action is different from :EXCLUDE-LINE."
                (when (eql? (nth buf cursor) fieldSep)
                  (-- column))
                (when (= column nColumns)
-                 (setf (fill-pointer buffer) cursor)
-                 (break)))
+                 (setf (length buffer) cursor)
+                 (break))
+               (-- cursor))
              (output-separators self rowSep 1))))))
 
 
 ;;; Callback streams:
+
+(defconstant CALLBACK-STREAM-PUTBACK INTEGER 8)
 
 (defclass CALLBACK-INPUT-STREAM (INPUT-STREAM)
   :documentation "Input stream class that uses a Python callback to read chunks of data.
@@ -953,7 +961,8 @@ and supplying it to the stream buffer of the underlying C++ stream object."
           (buffer-size :type INTEGER :initially 4096)
           (buffer :type MUTABLE-STRING)
           ;; FIXME: `read-into-tokenizer-buffer' doesn't work right with :LINE buffering
-          (buffering-scheme :initially :BLOCK))
+          (buffering-scheme :initially :BLOCK)
+          (debug-stream :type INPUT-STREAM))
   :initializer initialize-object)
 
 
@@ -964,33 +973,64 @@ and supplying it to the stream buffer of the underlying C++ stream object."
 ;;; directly specialized in this way, since they do not provide any virtual methods.
 
 (verbatim :cpp
-  "class NativeCallbackStreambuffer: public gc, public std::streambuf {
+  "class NativeCallbackStreambuffer: public std::streambuf {
 public:
   CallbackInputStream* callbackStream = NULL;
+  char* buffer_ = NULL;
+  int bufsize_  = -1;
+  int putback_ = 0;
 
-  NativeCallbackStreambuffer(CallbackInputStream* cbstream) : std::streambuf() {
+  void checkBounds(const char* loc) {
+    // debugging utility
+    char* start = buffer_;
+    char* end = buffer_ + putback_ + bufsize_;
+    if ( eback() < start || eback() > end || gptr() < start || gptr() > end || egptr() < start || egptr() > end ) {
+      std::cerr << \">>> checkBounds: buffer bounds violation at: \" << loc << std::endl;
+      throw *newReadException(\"checkBounds: buffer bounds violation\");
+    }
+  }
+
+  NativeCallbackStreambuffer(CallbackInputStream* cbstream, char* buffer, int bufsize, int pb=0) : std::streambuf() {
     callbackStream = cbstream;
+    bufsize_ = bufsize;
+    putback_ = pb;
+    buffer_  = buffer;
+
+    char* bufend = buffer_ + putback_ + bufsize_;
+    setg(bufend, bufend, bufend);
+    //std::cerr << \">>> NativeCallbackStreambuffer: \" << putback_ + bufsize_ << std::endl;
   }
 
   virtual std::streambuf::int_type underflow() {
-    //std::cout << \">>> underflow: \"<< std::endl;
-    int offset, length = 0;
-    // read the next chunk of data using fill-read-buffer:
-    char* data = (char*)callbackStream->fillReadBuffer(offset, length);
-    if (data == NULL) {
-      return traits_type::eof();
+    //std::cerr << \">>> underflow: \"<< std::endl;
+    if ( gptr() < egptr() ) {
+      //checkBounds(\"underflow1\");
+      return traits_type::to_int_type(*gptr());
     }
+    else {
+      // read the next chunk of data using fill-read-buffer, first save any putback:
+      for (int i = 0; i < putback_; i++ ) {
+        buffer_[i] = *(gptr() - putback_ + i);
+      }
+      int clen = callbackStream->fillReadBuffer(buffer_ + putback_);
+      if ( clen <= 0 ) {
+        //std::cerr << \">>> underflow: EOF\"<< std::endl;
+        return traits_type::eof();
+      }
     // crucial call that points streambuf to the location of the newly buffered data:
-    setg(data, data + offset, data + length);
-    return traits_type::to_int_type(data[0]);
+    setg(buffer_, buffer_ + putback_, buffer_ + putback_ + clen);
+    //checkBounds(\"underflow2\");
+    //return traits_type::to_int_type(*gptr());
+    return traits_type::to_int_type(*(buffer_ + putback_));
+    }
   }
 };
 
-class NativeCallbackStream: public gc, public std::istream {
+class NativeCallbackStream: public std::istream {
 public:
-  NativeCallbackStream(CallbackInputStream* cbstream) : std::istream() {
+  NativeCallbackStream(CallbackInputStream* cbstream, char* buffer, int bufsize, int pb=0) : std::istream() {
     // set the read buffer of this stream to our customized version:
-    rdbuf(new NativeCallbackStreambuffer(cbstream));
+    rdbuf(new (GC) NativeCallbackStreambuffer(cbstream, buffer, bufsize, pb));
   }
 };
 
@@ -1001,26 +1041,66 @@ public:
   :documentation "Initialize the native stream of 'self' with a new
 NativeCallbackInputStream and initialize or resize the buffer."
   :public? TRUE
-  (setf (native-stream self)
-    (verbatim :cpp "new NativeCallbackStream(self)"
-              :otherwise NULL))
-  (setf (buffer self) (make-raw-mutable-string (buffer-size self))))
+  (let ((bsize (buffer-size self))
+        (putback CALLBACK-STREAM-PUTBACK)
+        (buffer (make-mutable-string (+ putback bsize) #\space)))
+    ;; IMPORTANT: link the buffer here to prevent premature GC - this took us a while to track down:
+    (setf (buffer self) buffer)
+    (setf (native-stream self)
+      (verbatim :cpp "new (GC) NativeCallbackStream(self, buffer, bsize, putback)"
+                :otherwise NULL))))
 
-(defmethod (fill-read-buffer MUTABLE-STRING INTEGER INTEGER) ((self CALLBACK-INPUT-STREAM))
-  :documentation "Read the next chunk of data and return its char* buffer location (pointer)
-and the relevant start and end offsets.  Return NULL when EOF is encountered.  This calls
-a `python-reader' callback on the Python side that reads data from the stream and copies
-it into the callback stream's buffer."
+(defmethod (fill-read-buffer INTEGER) ((self CALLBACK-INPUT-STREAM) (buffer MUTABLE-STRING))
+  :documentation "Read the next chunk of data into `buffer' and return how many bytes were read.
+Return -1 when EOF is encountered.  Assumes `buffer' is of at least (buffer-size self).  We pass
+in `buffer' instead of using it directly from `self' to allow initial putback offsets.  This calls
+a `python-reader' callback on the Python side that reads data and copies it into `buffer'."
   :public? TRUE
-  (let ((clen INTEGER (funcall (python-reader self) (python-stream self) (buffer self) (buffer-size self))))
-    (cond ((<= clen 0)
-           ;(print ">>> fill-read-buffer: EOF" EOL)
-           (return NULL 0 0)) ;; EOF
+  (let ((clen -1))
+    (cond ((defined? (debug-stream self))
+           (if-output-language :cpp
+               (setq clen (byte-array-read-sequence (cast buffer TOKENIZER-BYTE-ARRAY) (debug-stream self) 0 (buffer-size self)))
+               NULL))
           (otherwise
-           (return (buffer self) 0 clen)))))
+           (setq clen (funcall (python-reader self) (python-stream self) buffer (buffer-size self)))))
+    (cond ((<= clen 0)
+           (return -1)) ;; EOF
+          (otherwise
+           (return clen)))))
 
 
 ;;; Testing:
+
+(defmethod check-integrity ((self KGTK-VALIDATION-ITERATOR) (where STRING))
+  ;; Debugging utility to track down memory corruption.
+  (let ((input (input-stream self))
+        (buffer (buffer self))
+        (len (length buffer))
+        (size (buffer-size buffer))
+        (buf (buffer buffer)))
+    (typecase input
+      (CALLBACK-INPUT-STREAM
+       (when (and (defined? (python-stream input))
+                  (not (long-integer? (python-stream input))))
+         (print "INTERNAL ERROR: python stream pointer corrupted" EOL)
+         (break-program "break"))
+       (let ((natstream (native-stream input))
+             (rdbufsize (+ (buffer-size input) CALLBACK-STREAM-PUTBACK))
+             (rdbuf MUTABLE-STRING
+                    (verbatim :cpp "((NativeCallbackStreambuffer*)((NativeCallbackStream*)natstream)->rdbuf())->buffer_"
+                              :otherwise NULL)))
+         (when (< (verbatim :cpp "(int)strnlen(rdbuf, rdbufsize)" :otherwise rdbufsize) rdbufsize)
+           (print "INTERNAL ERROR: read buffer corrupted" EOL)
+           (print "  at:   " where EOL)
+           (print "  line: " (line-number self) EOL)
+           (print "  off:  " (verbatim :cpp "strnlen(rdbuf, rdbufsize)" :otherwise rdbufsize) EOL)
+           (break-program "break"))))
+      (otherwise NULL))
+    (when (< (verbatim :cpp "(int)strnlen(buf, size)" :otherwise size) len)
+      (print "INTERNAL ERROR: string buffer corrupted" EOL)
+      (print "  at:   " where EOL)
+      (print "  line: " (line-number self) EOL)
+      (break-program "break"))))
 
 (defun (test-kgtk-validation-iterator INTEGER) ((file STRING) (logFile STRING))
   :documentation "Test driver."
@@ -1064,3 +1144,34 @@ it into the callback stream's buffer."
              (when (<= nLines 0)
                (close iter)
                (return))))))
+
+(defun (test-kgtk-validation-iterator4 INTEGER) ((file STRING) (logFile STRING) (invalidFile STRING))
+  :documentation "Test driver."
+  :public? TRUE :command? TRUE
+  (let ((iter (allocate-kgtk-validation-iterator file logFile invalidFile))
+        ;(bufsize 4096)
+        (bufsize 1048576)
+        (count LONG-INTEGER 0))
+    (setf (error-limit iter) 0)
+    (setf (invalid-value-action iter) :EXCLUDE-LINE)
+    (setf (input-stream iter)
+      (new CALLBACK-INPUT-STREAM
+           :debug-stream (input-stream iter)
+           :buffer-size bufsize))
+    (initialize-object (cast (input-stream iter) CALLBACK-INPUT-STREAM))
+    (while (next? iter)
+      (++ count (length (the-string (value iter)))))
+    (print (line-number iter) " " count EOL)
+    (return (line-number iter))))
+
+(defun (test-kgtk-validation-iterator5 INTEGER) ((file STRING) (logFile STRING) (invalidFile STRING))
+  :documentation "Test driver.  Just like #4 but without the callback stream so we can test in Java."
+  :public? TRUE :command? TRUE
+  (let ((iter (allocate-kgtk-validation-iterator file logFile invalidFile))
+        (count LONG-INTEGER 0))
+    (setf (error-limit iter) 0)
+    (setf (invalid-value-action iter) :EXCLUDE-LINE)
+    (while (next? iter)
+      (++ count (length (the-string (value iter)))))
+    (print (line-number iter) " " count EOL)
+    (return (line-number iter))))

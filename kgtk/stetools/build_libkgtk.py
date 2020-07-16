@@ -22,6 +22,20 @@ import stellapi as spi
 #       since we don't have any dependent systems we don't lose anything.
 # TO DO: we should support generation of build files like this directly from STELLA
 
+# GC segfault bug summary:
+# - we had some real bugs in the reader, such as incorrect resetting of `lineStart' which we fixed
+# - we figured out that the bug was GC-related, since disabling it made everything work fine
+# - the root cause seems to have been the missing -DSTELLA_USE_GC definition during compilation
+#   which only showed up in the Python version but not in our regular kgtk build
+# - even once we switched to `build_libkgtk_dbg.py' and compiled with the regular STELLA make process,
+#   we had introduced new errors that continued giving us similar problems, such as, eliminating the
+#   link of the read buffer to the callback stream which caused premature collection, and also
+#   setting GC_DEBUG to 1 while still using the non-debug finalizer functions in stellapi directly
+# - there were many other potential problems and confounders which served as distractors (GC library
+#   mismatches, new C++ stream class, Python 3, data transfer from Python to C++, multi-processing,...)
+# - eventually, we dug ourselves out of that and finally, when we moved back to the original build
+#   process we discovered the missing STELLA_USE_GC which has now been added - phew
+
 
 module_dir = os.path.realpath(os.path.dirname(__file__))
 source_dir = os.path.join(module_dir, 'sources')
@@ -67,6 +81,7 @@ def get_namespaces(file='startup-system.cc'):
     return nss
 
 module_code = io.StringIO()
+module_code.write('#define STELLA_USE_GC\n') # IMPORTANT, usually defined as -DSTELLA_USE_GC make switch
 for file in kgtk_files:
     with open(os.path.join(kgtk_dir, file), 'rt') as kf:
         module_code.write(kf.read())
@@ -82,11 +97,10 @@ ffibuilder.set_source(module_name,
                       module_code,
                       language='c++',
                       source_extension='.cc',
-                      include_dirs=[cpp_dir, os.path.join(spi_dir, 'include')],
-                      library_dirs=[os.path.join(spi_dir, '.libs'), '/usr/lib/x86_64-linux-gnu'], ######## EXPERIMENT
-                      runtime_library_dirs=['$ORIGIN', '$ORIGIN/.libs', os.path.join(spi_dir, '.libs'), '/usr/lib/x86_64-linux-gnu'],
-                      libraries = ['stella', #gc'
-                                   ':libgc.so.1'], ######## EXPERIMENT
+                      include_dirs=[cpp_dir, os.path.join(spi_dir, 'include'), os.path.join(spi_dir, 'include', 'gc')],
+                      library_dirs=[os.path.join(spi_dir, '.libs')],
+                      runtime_library_dirs=['$ORIGIN', '$ORIGIN/.libs', os.path.join(spi_dir, '.libs')],
+                      libraries = ['stella', 'gc'],
                       # force a consistent SOABI extension in Py3 in case we build with setuptools:
                       py_limited_api = False,
 )
@@ -96,6 +110,8 @@ for line in module_code.splitlines():
     if line.startswith('extern "C"'):
         ffibuilder.cdef(line.replace('extern "C" ', '').replace('{', ';'))
 
+# define a new-style callback we need:
+ffibuilder.cdef('extern "Python" int new_callback_stream_reader(void*, char*, int);')
 
 if __name__ == "__main__":
     ffibuilder.compile(verbose=False)

@@ -68,7 +68,7 @@ def validate_syntax(file, log_file=sys.stderr, invalid_file=None, output=None,
     iter = kpi.allocate_validation_iterator(file=file, log_file=log_file, invalid_file=invalid_file,
                                             invalid_value_action=invalid_value_action,
                                             error_limit=error_limit, chunk_size=chunk_size,
-                                            smart=True, bg=True)
+                                            smart=True, bg=True, _expert=_expert, _debug=_debug)
     if isinstance(output, str):
         output = open(output, mode='wt')
     try:

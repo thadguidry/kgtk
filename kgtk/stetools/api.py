@@ -87,8 +87,8 @@ spi.defconstructor('kgtk/callback-input-stream')
 spi.defslot('kgtk/callback-input-stream.python-stream')
 spi.defslot('kgtk/callback-input-stream.python-reader')
 spi.defslot('kgtk/callback-input-stream.buffer-size')
-# FIXME: mutable string readers not yet supported:
-#spi.defslot('kgtk/callback-input-stream.buffer')
+spi.defslot('kgtk/callback-input-stream.debug-stream')
+spi.defslot('kgtk/callback-input-stream.buffer')
 spi.defmethod('kgtk/callback-input-stream.initialize-object')
 
 
@@ -101,28 +101,60 @@ DEFAULT_INVALID_VALUE_ACTION = 'pass'
 
 @_ffi.callback("int(void*, char*, int)")
 def callback_stream_reader(pystream_ptr, buffer, size):
-    pystream = spi.getPythonObjectFromStellaPointer(pystream_ptr)
+    """Read `size' bytes from the Python stream identified by `pystream_ptr' into `buffer'
+    and return the actual number of bytes read (0 means EOF).
+    """
+    # TO DO: consider supporting/using read_into instead of read
     #print('>>> callback_stream_reader: ', pystream_ptr)
-    # FIXME: for now we just cut size in half in case it grows during encoding:
-    data = pystream.read(max(size // 2, 1))
+    pystream = spi.getPythonObjectFromStellaPointer(pystream_ptr)
+    if hasattr(pystream, 'encoding'): # is this a sufficient test?
+        data = pystream.read(max(size // 2, 1))
+    else:
+        data = pystream.read(size)
     if isinstance(data, str):
         data = data.encode(sr.DEFAULT_ENCODING)
     datalen = len(data)
-    if datalen > size:
+    if datalen > size or datalen < 0:
         raise KGTKException('INTERNAL ERROR: callback_stream_reader: buffer overflow, size=%d, datalen=%d\n' % (size, datalen))
     # this simply copies a Python char* `data' into a preallocated STELLA char* `buffer':
-    # TO DO: consider supporting/using read_into instead of read
-    _ffi.memmove(buffer, _ffi.from_buffer(memoryview(data)), datalen)
+    _ffi.memmove(buffer, data, datalen)
+    #print('>>> callback_stream_reader: ', pystream_ptr, buffer, size, datalen)
     return datalen
 
-def allocate_callback_stream(pystream, bufsize=DEFAULT_BUFFER_SIZE):
+
+# new-style callbacks (we need to switch to those eventually to avoid security exceptions):
+from kgtk.stetools._libkgtk import ffi, lib
+
+@ffi.def_extern()
+def new_callback_stream_reader(pystream_ptr, buffer, size):
+    """Read `size' bytes from the Python stream identified by `pystream_ptr' into `buffer'
+    and return the actual number of bytes read (0 means EOF).
+    """
+    # TO DO: consider supporting/using read_into instead of read
+    #print('>>> new_callback_stream_reader: ', pystream_ptr)
+    pystream = spi.getPythonObjectFromStellaPointer(pystream_ptr)
+    if hasattr(pystream, 'encoding'): # is this a sufficient test?
+        data = pystream.read(max(size // 2, 1))
+    else:
+        data = pystream.read(size)
+    if isinstance(data, str):
+        data = data.encode(sr.DEFAULT_ENCODING)
+    datalen = len(data)
+    if datalen > size or datalen < 0:
+        raise KGTKException('INTERNAL ERROR: callback_stream_reader: buffer overflow, size=%d, datalen=%d\n' % (size, datalen))
+    # this simply copies a Python char* `data' into a preallocated STELLA char* `buffer':
+    ffi.memmove(buffer, data, datalen)
+    return datalen
+
+def allocate_callback_stream(pystream=None, bufsize=DEFAULT_BUFFER_SIZE):
     cbstream = pkgtk.CallbackInputStream()
     cbstream.bufferSize = bufsize
+    if pystream is not None:
+        pystreamPtr = spi.getPythonObjectStellaPointer(pystream)
+        cbstream.pythonStream = pystreamPtr
+        #print('>>> allocate_callback_stream: pystream_ptr=', repr(pystreamPtr), pystreamPtr._stellaObject)
     cbstream.pythonReader = callback_stream_reader
-    pystreamPtr = spi.getPythonObjectStellaPointer(pystream)
-    cbstream.pythonStream = pystreamPtr
-    pystream = spi.getPythonObjectFromStellaPointer(pystreamPtr)
-    #print('>>> allocate_callback_stream:', pystreamPtr)
+    #cbstream.pythonReader = lib.new_callback_stream_reader
     cbstream.initializeObject()
     return cbstream
 
@@ -148,7 +180,7 @@ def prepare_validation_input_stream(file, smart=True, bg=False):
     KGTKException("prepare_validation_input_stream: don't know how to handle input of type %s" % type(file))
 
 def allocate_validation_iterator(file=sys.stdin, log_file=sys.stderr, invalid_file=None, invalid_value_action=None,
-                                      error_limit=None, chunk_size=None, smart=True, bg=False):
+                                 error_limit=None, chunk_size=None, smart=True, bg=False, _expert=False, _debug=False):
     if (file == sys.stdin or file == sys.stdin.buffer) and not smart:
         file = None
     else:
@@ -164,10 +196,12 @@ def allocate_validation_iterator(file=sys.stdin, log_file=sys.stderr, invalid_fi
 
     if isinstance(file, str):
         iter = pkgtk.allocateKgtkValidationIterator(file=file, logfile=log_file, invalidfile=invalid_file)
+    elif file is not None:
+        iter = pkgtk.allocateKgtkValidationIterator(logfile=log_file, invalidfile=invalid_file)
+        iter.inputStream = allocate_callback_stream(file, bufsize=DEFAULT_BUFFER_SIZE)
     else:
         iter = pkgtk.allocateKgtkValidationIterator(logfile=log_file, invalidfile=invalid_file)
-        if file is not None:
-            iter.inputStream = allocate_callback_stream(file, bufsize=DEFAULT_BUFFER_SIZE)
+
     iter.invalidValueAction = pstella.internKeyword(invalid_value_action)
     iter.skipHeaderP = False
     iter.errorLimit = (error_limit is None and DEFAULT_ERROR_LIMIT) or error_limit
@@ -178,8 +212,10 @@ def close_validation_iterator(iter):
     # we can't easily build this into iter.close() since it would require another STELLA to Python callback:
     input_stream = iter.inputStream
     if isinstance(input_stream, pkgtk.CallbackInputStream):
-        pystream = spi.getPythonObjectFromStellaPointer(input_stream.pythonStream)
-        pystream.close()
+        pystreamPtr = input_stream.pythonStream
+        if pystreamPtr is not None:
+            pystream = spi.getPythonObjectFromStellaPointer(pystreamPtr)
+            pystream.close()
     iter.close()
 
 

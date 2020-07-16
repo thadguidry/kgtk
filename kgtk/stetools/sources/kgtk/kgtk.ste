@@ -39,7 +39,7 @@
 ;;;;;; Top Level
   ;;
 
-(defglobal *kgtk-version-string* STRING "KGTK 0.1.0")
+(defglobal *kgtk-version-string* STRING "KGTK 0.2.0")
 
 (defglobal *kgtk-welcome-message* STRING
   (concatenate "Welcome to " *kgtk-version-string* EOL-STRING))
@@ -48,6 +48,7 @@
   (print *kgtk-welcome-message*))
 
 
-(defmain ()
+(defmain (count arguments)
   (print-kgtk-welcome)
+  (process-command-line-arguments count arguments :warn)
   (print "Bye" EOL))

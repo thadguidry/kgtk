@@ -50,22 +50,9 @@ module_name = 'kgtk.stetools._libkgtk'
 
 # retranslate STELLA sources to C++:
 
-if not os.path.exists(kgtk_dir):
-    os.makedirs(kgtk_dir)
-
-spi.defun('stella/load-file')
-spi.defun('stella/evaluate-string')
-spi.stella.pdef.loadFile(os.path.join(os.path.dirname(spi.__file__), 'sources', 'systems', 'stella-system.ste'))
-#spi.stella.pdef.loadFile(os.path.join(source_dir, 'systems', 'kgtk-system.ste')) # not needed
-
-spi.stella.pdef.evaluateString("""
-    (translate-system "kgtk" :cpp
-                      :force-translation? true
-                      :recursive? false
-                      :production-settings? true
-                      ;; setting this locates the system and generates relative include pathnames:
-                      :root-native-directory "%s")
-    """ % native_dir)
+spi.loadFile(os.path.join(os.path.dirname(spi.__file__), 'sources', 'systems', 'stella-system.ste'))
+spi.loadFile(os.path.join(source_dir, 'systems', 'kgtk-system.ste'))
+spi.translateSystem("kgtk", "cpp", force=True, devel=False)
 
 
 # compile C++ into Python extension library:

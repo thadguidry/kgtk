@@ -241,6 +241,20 @@ def add_arguments(parser: KGTKArgumentParser):
         default=None,
         help='path to output split English sitelink file')
     parser.add_argument(
+        '--split-sitelink-qualifier-file',
+        action="store",
+        type=str,
+        dest="split_sitelink__qualifier_file",
+        default=None,
+        help='path to output split sitelink qualifier file')
+    parser.add_argument(
+        '--split-en-sitelink-qualifier-file',
+        action="store",
+        type=str,
+        dest="split_en_sitelink_qualifier_file",
+        default=None,
+        help='path to output split English sitelink qualifier file')
+    parser.add_argument(
         '--split-type-file', '--split-entity-type-file',
         action="store",
         type=str,
@@ -263,8 +277,6 @@ def add_arguments(parser: KGTKArgumentParser):
         dest="split_property_qual_file",
         default=None,
         help='path to output split property qualifier file')
-
-    # TODO: Create a seperate file for the sitelinks.
 
     parser.add_argument(
         "--limit",
